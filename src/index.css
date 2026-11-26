@@ -1,45 +1,108 @@
 @import "tailwindcss";
 
-@layer base {
-  :root {
-    color-scheme: dark;
-  }
-
-  * {
-    scrollbar-width: thin;
-    scrollbar-color: #1e293b #090d16;
-  }
-
-  *::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-
-  *::-webkit-scrollbar-track {
-    background: #090d16;
-  }
-
-  *::-webkit-scrollbar-thumb {
-    background: #1e293b;
-    border-radius: 3px;
-  }
-
-  *::-webkit-scrollbar-thumb:hover {
-    background: #334155;
-  }
+:root {
+  --bg-canvas: #f5f5f2;
+  --bg-panel: #ffffff;
+  --bg-subtle: #eaeae6;
+  --fg-primary: #0f0f10;
+  --fg-secondary: #3f3f46;
+  --fg-muted: #52525b;
+  --border-hairline: #cfcfc9;
+  --border-strong: #18181b;
+  --grid-minor: #e4e4df;
+  --grid-major: #c6c6bf;
+  --accent-ink: #0f0f10;
+  --accent-bg: #0f0f10;
+  --accent-fg: #ffffff;
+  --focus-ring: #0284c7;
 }
 
-.font-mono-telemetry {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+.theme-dark {
+  --bg-canvas: #09090b;
+  --bg-panel: #101013;
+  --bg-subtle: #18181c;
+  --fg-primary: #f4f4f6;
+  --fg-secondary: #d4d4d8;
+  --fg-muted: #a1a1aa;
+  --border-hairline: #27272a;
+  --border-strong: #e4e4e7;
+  --grid-minor: #16161a;
+  --grid-major: #27272a;
+  --accent-ink: #f4f4f6;
+  --accent-bg: #f4f4f6;
+  --accent-fg: #09090b;
+  --focus-ring: #38bdf8;
+}
+
+* {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-hairline) var(--bg-panel);
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  background-color: var(--focus-ring);
+  color: #ffffff;
+}
+
+input,
+textarea,
+select {
+  caret-color: var(--focus-ring);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+*::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--bg-panel);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--border-hairline);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.font-mono-cad {
+  font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
   font-variant-numeric: tabular-nums;
 }
 
-@keyframes dash-flow {
-  to {
-    stroke-dashoffset: -24;
-  }
+.zone-transition {
+  transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.animate-egress-flow {
-  animation: dash-flow 1.2s linear infinite;
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.safe-x {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+/* Larger touch slider thumbs on phones and tablets */
+@media (pointer: coarse) {
+  input[type="range"] {
+    height: 24px;
+  }
 }

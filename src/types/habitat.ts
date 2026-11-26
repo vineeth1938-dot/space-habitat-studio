@@ -1,234 +1,194 @@
-export type GravityRegime = '0g' | '1/6g' | '3/8g';
+export type AgencyStandard = 'NASA' | 'ISRO' | 'SPACEX' | 'UNIFIED';
 
-export type HullType = 'rigid_cylinder' | 'inflatable' | 'surface_dome';
+export type HullGeometryType = 'cylinder' | 'inflatable' | 'dome' | 'multideck';
 
 export type ZoneType =
-  | 'crew_quarters'
-  | 'galley'
-  | 'hygiene'
+  | 'sleep'
   | 'exercise'
+  | 'hygiene'
+  | 'galley'
   | 'eclss'
   | 'medical'
-  | 'airlock'
-  | 'storm_shelter'
-  | 'stowage';
+  | 'storage'
+  | 'airlock';
 
-export type Severity = 'CRITICAL' | 'WARNING' | 'PASS';
+export type IssueSeverity = 'FAIL' | 'WARN' | 'PASS';
 
-export type RuleCategory =
-  | 'NHV'
-  | 'ACOUSTIC'
-  | 'CONTAMINATION'
-  | 'EGRESS'
-  | 'CREW_SUPPORT'
-  | 'GEOMETRY';
+export type ScoreCategory = 'volume' | 'acoustics' | 'adjacency' | 'egress' | 'radiation';
 
-export interface HullGeometry {
-  type: HullType;
-  diameter: number; // meters (Y span for cylinder/inflatable, full diameter for dome)
-  length: number; // meters (X span for cylinder/inflatable; equals diameter for dome)
-  decks: number; // 1 to 3
-  wallThickness: number; // meters (structural hull wall)
+export interface HabitatHull {
+  type: HullGeometryType;
+  /** Usable bounding width along X-axis in meters (0.5m grid increments) */
+  widthM: number;
+  /** Usable bounding depth along Y-axis in meters (0.5m grid increments) */
+  depthM: number;
+  /** Clear deck ceiling height in meters */
+  deckHeightM: number;
+  /** Number of stacked pressurized decks (1 for single-deck, 2–3 for multideck) */
+  decks: number;
 }
 
 export interface MissionConfig {
   name: string;
-  crewSize: number; // 2 - 12
-  durationDays: number; // 30 - 1000
-  gravity: GravityRegime;
-  hull: HullGeometry;
+  standard: AgencyStandard;
+  /** Crew complement clamped [1, 12] */
+  crewSize: number;
+  /** Mission duration clamped [3, 1000] days */
+  durationDays: number;
+  /** Active Solar Particle Event (X-Class Flare) stress simulation toggle */
+  solarFlareSim: boolean;
+  hull: HabitatHull;
 }
 
-export interface ZoneNode {
+export interface ZoneModule {
   id: string;
   type: ZoneType;
   label: string;
-  deck: number; // 0-indexed deck
-  x: number; // meters from hull left edge (snapped to 0.25m)
-  y: number; // meters from hull top edge (snapped to 0.25m)
-  width: number; // meters (X span in current orientation)
-  height: number; // meters (Y span in current orientation)
-  zHeight: number; // meters (vertical ceiling height inside deck)
-  rotation: 0 | 90 | 180 | 270;
-  locked?: boolean;
+  /** 0-indexed deck level */
+  deck: number;
+  /** Top-left X coordinate in meters (0.5m increments) */
+  x: number;
+  /** Top-left Y coordinate in meters (0.5m increments) */
+  y: number;
+  /** Width along X in meters (0.5m increments) */
+  w: number;
+  /** Depth along Y in meters (0.5m increments) */
+  h: number;
+  /** Orientation angle in degrees */
+  rotation: 0 | 90;
 }
 
-export interface ZoneCatalogEntry {
-  type: ZoneType;
-  label: string;
-  shortLabel: string;
-  description: string;
-  defaultWidth: number;
-  defaultHeight: number;
-  minWidth: number;
-  minHeight: number;
-  defaultZHeight: number;
-  color: string;
-  accentColor: string;
-  noiseEmitDba: number; // 0 if quiet
-  isQuietZone: boolean;
-  isContaminationSource: boolean;
-  isContaminationSensitive: boolean;
-  isOccupied: boolean; // requires egress paths
-  isEquipmentOnly: boolean; // deducted from NHV as equipment/stowage
-  equipmentFraction: number; // fraction of zone volume occupied by hardware racks/equipment (0..1)
-  massDensityKgPerM3: number; // estimated outfitting equipment mass density
-}
-
-export interface RuleViolation {
+export interface ValidationIssue {
   id: string;
-  ruleCode: string;
-  category: RuleCategory;
-  severity: Severity;
+  code: string;
+  agency: 'NASA' | 'ISRO' | 'SPACEX';
+  severity: IssueSeverity;
+  category: ScoreCategory;
   title: string;
   detail: string;
+  action: string;
   metric: string;
-  affectedZoneIds: string[];
-  recommendation: string;
+  moduleIds: string[];
 }
 
-export interface AcousticPair {
-  sourceId: string;
-  sourceLabel: string;
-  targetId: string;
-  targetLabel: string;
-  sourceDba: number;
-  receivedDba: number;
-  limitDba: number;
-  distanceM: number;
-  violates: boolean;
+export interface ScoreBreakdown {
+  overall: number;
+  volume: number;
+  acoustics: number;
+  adjacency: number;
+  egress: number;
+  radiation: number;
 }
 
-export interface ContaminationPair {
-  hygieneId: string;
-  hygieneLabel: string;
-  targetId: string;
-  targetLabel: string;
-  distanceM: number;
-  minRequiredM: number;
-  violates: boolean;
-}
-
-export interface EgressPoint {
-  x: number;
-  y: number;
-}
-
-export interface EgressPath {
-  fromZoneId: string;
-  fromLabel: string;
-  targetZoneId: string;
-  targetLabel: string;
-  targetType: 'airlock' | 'storm_shelter';
-  deck: number;
-  reachable: boolean;
-  distanceM: number;
-  transitTimeSec: number;
-  points: EgressPoint[];
-  minClearanceM: number;
-}
-
-export interface BottleneckPoint {
-  x: number;
-  y: number;
-  deck: number;
-  clearanceM: number;
-}
-
-export interface EgressResult {
-  airlockPaths: EgressPath[];
-  shelterPaths: EgressPath[];
-  overallReachable: boolean;
-  shelterReachable: boolean;
-  worstCaseDistanceM: number;
-  worstCaseTimeSec: number;
-  worstShelterDistanceM: number;
-  worstShelterTimeSec: number;
-  bottleneckPoints: BottleneckPoint[];
-  gridResolutionM: number;
-}
-
-export interface EvaluationReport {
-  score: number; // 0 - 100
-  grossVolumeM3: number;
-  structureVolumeM3: number;
-  equipmentVolumeM3: number;
-  deadSpaceM3: number;
-  nhvM3: number;
+export interface VolumeMetrics {
+  grossHullVolumeM3: number;
+  structuralOverheadM3: number;
+  netHabitableVolumeM3: number;
   nhvPerCrewM3: number;
   requiredNhvPerCrewM3: number;
-  estimatedMassKg: number;
-  estimatedLaunchCostM: number; // $M USD
-  violations: RuleViolation[];
-  criticalCount: number;
-  warningCount: number;
-  passCount: number;
-  acousticPairs: AcousticPair[];
-  contaminationPairs: ContaminationPair[];
-  egress: EgressResult;
-  computeTimeMs: number;
+  sleepVolumeM3: number;
+  sleepVolumePerCrewM3: number;
+  requiredSleepPerCrewM3: number;
+  totalHullFloorAreaM2: number;
+  occupiedFloorAreaM2: number;
+  volumetricEfficiencyPct: number;
+}
+
+export interface AcousticCell {
+  x: number;
+  y: number;
+  deck: number;
+  dba: number;
+  nc: number;
+}
+
+export interface AcousticMetrics {
+  cells: AcousticCell[];
+  maxSleepDba: number;
+  sleepLimitDba: number;
+  maxHabitableDba: number;
+  habitableLimitDba: number;
+  violatingSleepIds: string[];
+  violatingSourceIds: string[];
+}
+
+export interface AdjacencyMetrics {
+  hygieneCount: number;
+  requiredHygieneCount: number;
+  eclssCorridorClearanceM: number;
+  eclssBlocksTransit: boolean;
+  exerciseAreaM2: number;
+  medicalConnectedBonus: boolean;
+  shieldedSleepPerimeterPct: number;
+  requiredShieldPct: number;
+  trappedDeadPocketCells: number;
+  overlappingPairs: Array<[string, string]>;
+  outOfBoundsIds: string[];
+}
+
+export interface EgressRoute {
+  fromModuleId: string;
+  fromLabel: string;
+  fromType: ZoneType;
+  targetAirlockId: string;
+  deck: number;
+  valid: boolean;
+  distanceM: number;
+  evacuationTimeSec: number;
+  minCorridorWidthM: number;
+  hasDisjointBackup: boolean;
+  points: Array<{ x: number; y: number }>;
+}
+
+export interface EgressMetrics {
+  routes: EgressRoute[];
+  allValid: boolean;
+  maxDistanceM: number;
+  maxWorkSleepDistanceM: number;
+  maxEvacuationTimeSec: number;
+  minCorridorWidthM: number;
+  dualEgressRequired: boolean;
+  dualEgressSatisfied: boolean;
+}
+
+export interface HabitatEvaluation {
+  scores: ScoreBreakdown;
+  issues: ValidationIssue[];
+  volume: VolumeMetrics;
+  acoustics: AcousticMetrics;
+  adjacency: AdjacencyMetrics;
+  egress: EgressMetrics;
+  computeMs: number;
 }
 
 export interface LayoutSnapshot {
   id: string;
   name: string;
-  timestamp: number;
+  createdAt: string;
   mission: MissionConfig;
-  zones: ZoneNode[];
-  report: EvaluationReport;
+  modules: ZoneModule[];
+  scores: ScoreBreakdown;
+  summary: {
+    nhvPerCrewM3: number;
+    maxSleepDba: number;
+    maxEgressDistanceM: number;
+    shieldedSleepPerimeterPct: number;
+    volumetricEfficiencyPct: number;
+    failCount: number;
+    warnCount: number;
+  };
 }
 
-export interface TelemetryPoint {
-  timestamp: string;
-  value: number;
-}
-
-export type WeatherSource = 'LIVE_NOAA_GOES' | 'SIMULATED_PRESET';
-
-export type StormPresetId = 'live' | 'quiet_b' | 'moderate_m5' | 'extreme_x10';
-
-export interface SpaceWeatherTelemetry {
-  source: WeatherSource;
-  presetId: StormPresetId;
+export interface ComparisonDiff {
+  key: string;
   label: string;
-  fetchedAt: string;
-  xrayFluxWm2: number; // 0.1-0.8 nm W/m^2
-  xrayClass: string; // e.g., "B4.2", "M5.4", "X10.0"
-  protonFluxPfu: number; // >=10 MeV particles / (cm^2 s sr)
-  noaaRScale: string; // R0 - R5
-  noaaSScale: string; // S0 - S5
-  xraySeries: TelemetryPoint[];
-  protonSeries: TelemetryPoint[];
-  warningWindowSec: number; // estimated time from flare detection to peak proton arrival
-}
-
-export interface StormStressResult {
-  verdict: 'PASS' | 'MARGINAL' | 'FAIL';
-  hasShelter: boolean;
-  shelterVolumeM3: number;
-  shelterVolumePerCrewM3: number;
-  requiredVolumePerCrewM3: number;
-  allCrewReachable: boolean;
-  worstTransitSec: number;
-  warningWindowSec: number;
-  shieldingArealDensityGcm2: number;
-  unshieldedDoseMsv: number;
-  shieldedDoseMsv: number;
-  acuteLimitMsv: number;
-  diagnostics: Array<{
-    severity: Severity;
-    title: string;
-    detail: string;
-  }>;
-}
-
-export interface OptimizationSummary {
-  beforeScore: number;
-  afterScore: number;
-  beforeCritical: number;
-  afterCritical: number;
-  beforeWarning: number;
-  afterWarning: number;
-  iterations: number;
-  previousZones: ZoneNode[];
+  unit: string;
+  valueA: number;
+  valueB: number;
+  delta: number;
+  higherIsBetter: boolean;
+  improved: boolean | null;
+  displayA: string;
+  displayB: string;
+  displayDelta: string;
 }
