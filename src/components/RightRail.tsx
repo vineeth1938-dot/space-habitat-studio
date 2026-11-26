@@ -29,22 +29,22 @@ export const RightRail: React.FC<RightRailProps> = ({ variant = 'desktop' }) => 
 
   const overallBadge =
     failCount === 0 && scores.overall >= 82
-      ? { label: 'PASS', color: '#10b981' }
+      ? { label: 'FLIGHT READY', color: '#10b981' }
       : failCount === 0 || scores.overall >= 60
-        ? { label: 'WARN', color: '#f59e0b' }
-        : { label: 'FAIL', color: '#ef4444' };
+        ? { label: 'NEEDS REVIEW', color: '#f59e0b' }
+        : { label: 'HAZARDS FOUND', color: '#ef4444' };
 
   const subBars: Array<{ label: string; val: number }> = [
-    { label: 'VOLUME', val: scores.volume },
-    { label: 'ACOUSTICS', val: scores.acoustics },
-    { label: 'ADJACENCY', val: scores.adjacency },
-    { label: 'EGRESS A*', val: scores.egress },
-    { label: 'RAD / REDUND', val: scores.radiation },
+    { label: 'Habitable Volume', val: scores.volume },
+    { label: 'Quietness (dBA)', val: scores.acoustics },
+    { label: 'Zone Separation', val: scores.adjacency },
+    { label: 'Escape Corridors', val: scores.egress },
+    { label: 'Radiation Shield', val: scores.radiation },
   ];
 
   const containerClass = isMobile
     ? 'w-full h-full flex flex-col overflow-y-auto'
-    : 'w-[300px] xl:w-[320px] shrink-0 h-full border-l flex flex-col overflow-hidden';
+    : 'w-[308px] xl:w-[324px] shrink-0 h-full border-l flex flex-col overflow-hidden';
 
   return (
     <aside
@@ -55,20 +55,21 @@ export const RightRail: React.FC<RightRailProps> = ({ variant = 'desktop' }) => 
         color: 'var(--fg-primary)',
       }}
     >
-      {/* Top: Compliance Score + Sub-Scores */}
+      {/* Top: Mission Readiness Score + Sub-Scores */}
       <div
-        className="p-3 border-b space-y-3 shrink-0"
+        className="p-3.5 border-b space-y-3 shrink-0"
         style={{ borderColor: 'var(--border-hairline)' }}
       >
         <div className="flex items-start justify-between gap-2">
           <div>
             <h2 className="text-xs font-bold uppercase tracking-wider">
-              Compliance Telemetry
+              Mission Readiness
             </h2>
-            <div className="flex items-baseline gap-2 mt-1">
+            <div className="flex items-baseline gap-1.5 mt-1">
               <span
                 data-testid="overall-score"
                 className="font-mono-cad text-3xl font-bold leading-none"
+                style={{ color: overallBadge.color }}
               >
                 {scores.overall}
               </span>
@@ -78,10 +79,10 @@ export const RightRail: React.FC<RightRailProps> = ({ variant = 'desktop' }) => 
             </div>
           </div>
 
-          <div className="flex flex-col items-end gap-1 font-mono-cad">
+          <div className="flex flex-col items-end gap-1">
             <span
               data-testid="overall-verdict"
-              className="px-2 py-0.5 text-[10px] font-bold border"
+              className="px-2 py-0.5 rounded text-[10px] font-bold border"
               style={{
                 borderColor: overallBadge.color,
                 color: overallBadge.color,
@@ -89,89 +90,122 @@ export const RightRail: React.FC<RightRailProps> = ({ variant = 'desktop' }) => 
             >
               {overallBadge.label}
             </span>
-            <span className="text-[10px]" style={{ color: 'var(--fg-muted)' }}>
-              {failCount} FAIL · {warnCount} WARN
+            <span className="font-mono-cad text-[11px]" style={{ color: 'var(--fg-muted)' }}>
+              {failCount} Critical · {warnCount} Warnings
             </span>
           </div>
         </div>
 
-        {/* 5 Sub-Score Hairline Bars */}
-        <div className="space-y-1.5 font-mono-cad text-[10px]">
+        {/* 5 Sub-Score Bars */}
+        <div className="space-y-1.5 text-xs">
           {subBars.map((sb) => (
             <div key={sb.label} className="flex items-center gap-2">
-              <span className="w-24 truncate" style={{ color: 'var(--fg-secondary)' }}>
+              <span className="w-28 truncate text-[11px]" style={{ color: 'var(--fg-secondary)' }}>
                 {sb.label}
               </span>
               <div
-                className="flex-1 h-1.5 border overflow-hidden"
-                style={{
-                  borderColor: 'var(--border-hairline)',
-                  backgroundColor: 'var(--bg-subtle)',
-                }}
+                className="flex-1 h-2 rounded-full overflow-hidden"
+                style={{ backgroundColor: 'var(--bg-subtle)' }}
               >
                 <div
-                  className="h-full transition-all duration-300"
+                  className="h-full rounded-full transition-all duration-300"
                   style={{
                     width: `${sb.val}%`,
                     backgroundColor: statusColor(sb.val),
                   }}
                 />
               </div>
-              <span className="w-7 text-right font-semibold">{sb.val}</span>
+              <span className="w-7 text-right font-mono-cad text-[11px] font-semibold">
+                {sb.val}
+              </span>
             </div>
           ))}
         </div>
 
-        {/* Key Numeric Readout Grid */}
-        <div
-          className="grid grid-cols-4 border font-mono-cad text-[10px]"
-          style={{ borderColor: 'var(--border-hairline)' }}
-        >
-          <div className="p-1.5 border-r min-w-0" style={{ borderColor: 'var(--border-hairline)' }}>
-            <div style={{ color: 'var(--fg-muted)' }}>NHV/C</div>
-            <div className="font-bold truncate">{volume.nhvPerCrewM3}m³</div>
-          </div>
-          <div className="p-1.5 border-r min-w-0" style={{ borderColor: 'var(--border-hairline)' }}>
-            <div style={{ color: 'var(--fg-muted)' }}>SLEEP</div>
-            <div className="font-bold truncate">{acoustics.maxSleepDba}dB</div>
-          </div>
-          <div className="p-1.5 border-r min-w-0" style={{ borderColor: 'var(--border-hairline)' }}>
-            <div style={{ color: 'var(--fg-muted)' }}>EGRESS</div>
-            <div className="font-bold truncate">
-              {egress.allValid ? `${egress.maxDistanceM}m` : 'BLK'}
+        {/* Key Human-Readable Telemetry Cards */}
+        <div className="grid grid-cols-2 gap-1.5 text-xs">
+          <div
+            className="p-2 rounded-md border"
+            style={{ borderColor: 'var(--border-hairline)', backgroundColor: 'var(--bg-elevated)' }}
+          >
+            <div className="text-[10px]" style={{ color: 'var(--fg-muted)' }}>
+              Volume / Crew
+            </div>
+            <div className="font-mono-cad font-bold mt-0.5">
+              {volume.nhvPerCrewM3} m³{' '}
+              <span className="font-normal text-[10px]" style={{ color: 'var(--fg-muted)' }}>
+                (min {volume.requiredNhvPerCrewM3})
+              </span>
             </div>
           </div>
-          <div className="p-1.5 min-w-0">
-            <div style={{ color: 'var(--fg-muted)' }}>SHIELD</div>
-            <div className="font-bold truncate">{adjacency.shieldedSleepPerimeterPct}%</div>
+
+          <div
+            className="p-2 rounded-md border"
+            style={{ borderColor: 'var(--border-hairline)', backgroundColor: 'var(--bg-elevated)' }}
+          >
+            <div className="text-[10px]" style={{ color: 'var(--fg-muted)' }}>
+              Sleep Noise
+            </div>
+            <div className="font-mono-cad font-bold mt-0.5">
+              {acoustics.maxSleepDba} dBA{' '}
+              <span className="font-normal text-[10px]" style={{ color: 'var(--fg-muted)' }}>
+                (≤{acoustics.sleepLimitDba})
+              </span>
+            </div>
+          </div>
+
+          <div
+            className="p-2 rounded-md border"
+            style={{ borderColor: 'var(--border-hairline)', backgroundColor: 'var(--bg-elevated)' }}
+          >
+            <div className="text-[10px]" style={{ color: 'var(--fg-muted)' }}>
+              Escape Path
+            </div>
+            <div className="font-mono-cad font-bold mt-0.5">
+              {egress.allValid ? `${egress.maxDistanceM} m` : 'Blocked'}
+            </div>
+          </div>
+
+          <div
+            className="p-2 rounded-md border"
+            style={{ borderColor: 'var(--border-hairline)', backgroundColor: 'var(--bg-elevated)' }}
+          >
+            <div className="text-[10px]" style={{ color: 'var(--fg-muted)' }}>
+              Water Shield
+            </div>
+            <div className="font-mono-cad font-bold mt-0.5">
+              {adjacency.shieldedSleepPerimeterPct}%{' '}
+              <span className="font-normal text-[10px]" style={{ color: 'var(--fg-muted)' }}>
+                (≥50%)
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* Action Buttons: AUTO-OPTIMIZE + SAVE & COMPARE */}
+        {/* Action CTAs */}
         <div className="grid grid-cols-1 gap-2 pt-0.5">
           <button
             type="button"
             data-testid="auto-optimize-btn"
             onClick={runAutoOptimize}
-            className="w-full min-h-[42px] md:min-h-[36px] px-3 border font-mono-cad text-xs md:text-[11px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer transition-opacity hover:opacity-90 active:opacity-80"
+            className="w-full min-h-[44px] md:min-h-[38px] px-3 rounded-lg text-xs font-bold tracking-wide flex items-center justify-center gap-2 cursor-pointer transition-opacity hover:opacity-95 active:scale-[0.99]"
             style={{
-              backgroundColor: 'var(--accent-bg)',
-              color: 'var(--accent-fg)',
-              borderColor: 'var(--border-strong)',
+              backgroundColor: 'var(--accent-primary)',
+              color: '#ffffff',
             }}
           >
-            <Sparkles className="w-3.5 h-3.5" />
+            <Sparkles className="w-4 h-4" />
             AUTO-OPTIMIZE LAYOUT
           </button>
 
           {lastOptimizeInfo && (
             <div
               data-testid="optimize-delta-banner"
-              className="px-2.5 py-1.5 border font-mono-cad text-[10px] flex items-center justify-between"
+              className="px-3 py-1.5 rounded-md border font-mono-cad text-[11px] flex items-center justify-between"
               style={{
                 borderColor: '#10b981',
                 color: '#10b981',
-                backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                backgroundColor: 'rgba(16, 185, 129, 0.10)',
               }}
             >
               <span>
@@ -185,7 +219,7 @@ export const RightRail: React.FC<RightRailProps> = ({ variant = 'desktop' }) => 
             type="button"
             data-testid="open-compare-btn"
             onClick={() => setCompareOpen(true)}
-            className="w-full min-h-[40px] md:min-h-[32px] px-3 border font-mono-cad text-xs md:text-[11px] font-semibold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer"
+            className="w-full min-h-[42px] md:min-h-[34px] px-3 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
             style={{
               backgroundColor: 'var(--bg-subtle)',
               color: 'var(--fg-primary)',
@@ -193,22 +227,22 @@ export const RightRail: React.FC<RightRailProps> = ({ variant = 'desktop' }) => 
             }}
           >
             <Columns2 className="w-3.5 h-3.5" />
-            SAVE &amp; COMPARE ({snapshots.length})
+            Compare &amp; Checkpoints ({snapshots.length})
           </button>
         </div>
       </div>
 
-      {/* Prioritized Actionable Fix List */}
-      <div className={isMobile ? 'flex-1' : 'flex-1 flex flex-col min-h-0 overflow-hidden'}>
+      {/* Prioritized Engineering Fix List */}
+      <div className={isMobile ? 'flex-1 pb-4' : 'flex-1 flex flex-col min-h-0 overflow-hidden'}>
         <div
-          className="px-3 py-2 border-b flex items-center justify-between shrink-0"
+          className="px-3.5 py-2 border-b flex items-center justify-between shrink-0"
           style={{ borderColor: 'var(--border-hairline)' }}
         >
           <h2 className="text-xs font-bold uppercase tracking-wider">
-            Actionable Diagnostics
+            Safety &amp; Habitability Checks
           </h2>
-          <span className="font-mono-cad text-[10px]" style={{ color: 'var(--fg-muted)' }}>
-            TAP TO FOCUS
+          <span className="text-[11px]" style={{ color: 'var(--fg-muted)' }}>
+            Tap to locate
           </span>
         </div>
 
@@ -229,19 +263,27 @@ export const RightRail: React.FC<RightRailProps> = ({ variant = 'desktop' }) => 
                 key={issue.id}
                 data-testid={`issue-${issue.id}`}
                 onClick={() => highlightModules(issue.moduleIds)}
-                className="w-full text-left p-3 md:p-2.5 space-y-1 cursor-pointer transition-colors hover:opacity-90 active:opacity-80"
+                className="w-full text-left p-3.5 md:p-3 space-y-1 cursor-pointer transition-colors hover:opacity-90 active:opacity-80"
                 style={{ borderColor: 'var(--border-hairline)' }}
               >
                 <div className="flex items-center justify-between gap-1.5 font-mono-cad text-[10px]">
                   <div className="flex items-center gap-1.5 min-w-0">
                     <span
-                      className="px-1 py-0.2 border font-bold shrink-0"
-                      style={{ borderColor: sevCol, color: sevCol }}
+                      className="px-1.5 py-0.5 rounded font-bold shrink-0"
+                      style={{
+                        color: sevCol,
+                        backgroundColor:
+                          issue.severity === 'FAIL'
+                            ? 'rgba(239, 68, 68, 0.14)'
+                            : issue.severity === 'WARN'
+                              ? 'rgba(245, 158, 11, 0.14)'
+                              : 'rgba(16, 185, 129, 0.14)',
+                      }}
                     >
                       {issue.severity}
                     </span>
                     <span
-                      className="px-1 py-0.2 border shrink-0"
+                      className="px-1.5 py-0.5 rounded border shrink-0"
                       style={{
                         borderColor: 'var(--border-hairline)',
                         color: 'var(--fg-muted)',
@@ -249,23 +291,20 @@ export const RightRail: React.FC<RightRailProps> = ({ variant = 'desktop' }) => 
                     >
                       {issue.agency}
                     </span>
-                    <span className="truncate" style={{ color: 'var(--fg-muted)' }}>
-                      {issue.code}
-                    </span>
                   </div>
                   <span className="font-semibold shrink-0">{issue.metric}</span>
                 </div>
 
                 <div className="text-xs font-semibold leading-snug break-words">{issue.title}</div>
-                <div className="text-[11px] leading-snug break-words" style={{ color: 'var(--fg-secondary)' }}>
+                <div className="text-[11px] leading-relaxed break-words" style={{ color: 'var(--fg-secondary)' }}>
                   {issue.detail}
                 </div>
                 {issue.severity !== 'PASS' && (
                   <div
-                    className="font-mono-cad text-[10px] pt-0.5 break-words"
-                    style={{ color: 'var(--fg-primary)' }}
+                    className="text-[11px] font-medium pt-0.5 break-words"
+                    style={{ color: 'var(--accent-primary)' }}
                   >
-                    FIX → {issue.action}
+                    How to fix: {issue.action}
                   </div>
                 )}
               </button>

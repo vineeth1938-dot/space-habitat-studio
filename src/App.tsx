@@ -10,7 +10,23 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { useCadStore } from './store/useCadStore';
 
 export const App: React.FC = () => {
-  const { theme, mobilePanel, tabletDrawerOpen, setTabletDrawerOpen } = useCadStore();
+  const {
+    theme,
+    mobilePanel,
+    tabletDrawerOpen,
+    statusNotice,
+    setTabletDrawerOpen,
+    clearNotice,
+  } = useCadStore();
+
+  // Auto-dismiss status toast after 3.2 seconds
+  useEffect(() => {
+    if (!statusNotice) return;
+    const timer = setTimeout(() => {
+      clearNotice();
+    }, 3200);
+    return () => clearTimeout(timer);
+  }, [statusNotice, clearNotice]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -74,6 +90,22 @@ export const App: React.FC = () => {
       >
         <TopBar />
 
+        {/* Subtle Non-Blocking Desktop/Tablet Status Toast */}
+        {statusNotice && mobilePanel !== 'build' && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="fixed bottom-16 md:bottom-5 left-1/2 -translate-x-1/2 z-30 px-3.5 py-2 rounded-full border text-xs font-medium shadow-lg pointer-events-none max-w-[90vw] truncate"
+            style={{
+              backgroundColor: 'var(--bg-panel)',
+              borderColor: 'var(--border-strong)',
+              color: 'var(--fg-primary)',
+            }}
+          >
+            {statusNotice}
+          </div>
+        )}
+
         {/* Desktop & Tablet Workspace (>= 768px) */}
         <div className="hidden md:flex flex-1 min-h-0 overflow-hidden relative">
           {/* Persistent Left Rail on Large Laptops/Desktops (>= 1152px) */}
@@ -85,7 +117,7 @@ export const App: React.FC = () => {
           {tabletDrawerOpen && (
             <div
               className="min-[1152px]:hidden fixed inset-0 z-40 flex"
-              style={{ backgroundColor: 'rgba(0, 0, 0, 0.45)' }}
+              style={{ backgroundColor: 'rgba(2, 6, 23, 0.55)' }}
               onClick={(e) => {
                 if (e.target === e.currentTarget) setTabletDrawerOpen(false);
               }}

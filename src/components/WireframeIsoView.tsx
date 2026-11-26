@@ -24,24 +24,41 @@ export const WireframeIsoView: React.FC<WireframeIsoViewProps> = ({
   const [isoZoom, setIsoZoom] = useState(1);
   const [deckGapM, setDeckGapM] = useState(3.8);
 
+  const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
   const orbitRef = useRef<{
     pointerId: number;
     startX: number;
     startY: number;
     az: number;
     pt: number;
+    moved: boolean;
   } | null>(null);
-  const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
   const pinchDistRef = useRef<number | null>(null);
 
+  // Global window pointerup/cancel cleanup so no finger ever gets stuck
   useEffect(() => {
+    const clearPointer = (e: PointerEvent) => {
+      pointersRef.current.delete(e.pointerId);
+      if (orbitRef.current?.pointerId === e.pointerId) {
+        orbitRef.current = null;
+      }
+      if (pointersRef.current.size < 2) {
+        pinchDistRef.current = null;
+      }
+    };
     const clearAll = () => {
-      orbitRef.current = null;
       pointersRef.current.clear();
+      orbitRef.current = null;
       pinchDistRef.current = null;
     };
+    window.addEventListener('pointerup', clearPointer);
+    window.addEventListener('pointercancel', clearAll);
     window.addEventListener('blur', clearAll);
-    return () => window.removeEventListener('blur', clearAll);
+    return () => {
+      window.removeEventListener('pointerup', clearPointer);
+      window.removeEventListener('pointercancel', clearAll);
+      window.removeEventListener('blur', clearAll);
+    };
   }, []);
 
   const { hull } = mission;
@@ -85,9 +102,8 @@ export const WireframeIsoView: React.FC<WireframeIsoViewProps> = ({
   }
 
   const handlePointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    // Notice: NO setPointerCapture here so tapping child <g> modules cleanly fires selection on touchscreens!
     pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    e.currentTarget.setPointerCapture?.(e.pointerId);
-
     if (pointersRef.current.size === 1) {
       orbitRef.current = {
         pointerId: e.pointerId,
@@ -95,6 +111,7 @@ export const WireframeIsoView: React.FC<WireframeIsoViewProps> = ({
         startY: e.clientY,
         az: azimuthDeg,
         pt: pitchDeg,
+        moved: false,
       };
     } else if (pointersRef.current.size === 2) {
       orbitRef.current = null;
@@ -107,44 +124,38 @@ export const WireframeIsoView: React.FC<WireframeIsoViewProps> = ({
     if (!pointersRef.current.has(e.pointerId)) return;
     pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-    if (pointersRef.current.size === 2 && pinchDistRef.current) {
+    if (pointersRef.current.size >= 2) {
       const pts = Array.from(pointersRef.current.values());
       const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
-      if (dist > 10 && pinchDistRef.current > 10) {
+      if (pinchDistRef.current && pinchDistRef.current > 12 && dist > 12) {
         const ratio = dist / pinchDistRef.current;
-        pinchDistRef.current = dist;
         setIsoZoom((z) => Math.max(0.55, Math.min(2.2, Number((z * ratio).toFixed(2)))));
       }
+      pinchDistRef.current = dist;
       return;
     }
 
     const orb = orbitRef.current;
     if (orb && orb.pointerId === e.pointerId) {
-      const nextAz = (orb.az + (e.clientX - orb.startX) * 0.45 + 360) % 360;
-      const nextPt = Math.max(15, Math.min(68, orb.pt + (e.clientY - orb.startY) * 0.25));
+      const dx = e.clientX - orb.startX;
+      const dy = e.clientY - orb.startY;
+      if (!orb.moved && Math.hypot(dx, dy) < 4) return;
+      orb.moved = true;
+      const nextAz = (orb.az + dx * 0.45 + 360) % 360;
+      const nextPt = Math.max(15, Math.min(68, orb.pt + dy * 0.25));
       setAzimuthDeg(Math.round(nextAz));
       setPitchDeg(Math.round(nextPt));
     }
   };
 
-  const endPointer = (pointerId: number) => {
-    pointersRef.current.delete(pointerId);
-    if (orbitRef.current?.pointerId === pointerId) {
-      orbitRef.current = null;
-    }
-    if (pointersRef.current.size < 2) {
-      pinchDistRef.current = null;
-    }
-  };
-
   return (
     <div
-      className="relative w-full h-full overflow-hidden flex flex-col"
+      className="relative w-full h-full overflow-hidden flex flex-col select-none"
       style={{ backgroundColor: 'var(--bg-canvas)' }}
     >
       {/* Floating Axonometric Angle Controls */}
       <div
-        className="absolute top-2 left-2 right-2 sm:right-auto z-10 flex items-center gap-1.5 px-2 py-1 border font-mono-cad text-[10px] overflow-x-auto no-scrollbar"
+        className="absolute top-2.5 left-2.5 right-2.5 sm:right-auto z-10 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border font-mono-cad text-[11px] overflow-x-auto no-scrollbar"
         style={{
           backgroundColor: 'var(--bg-panel)',
           borderColor: 'var(--border-hairline)',
@@ -152,18 +163,19 @@ export const WireframeIsoView: React.FC<WireframeIsoViewProps> = ({
           touchAction: 'pan-x',
         }}
       >
-        <span className="shrink-0">AXONOMETRIC WIREFRAME</span>
+        <span className="shrink-0 font-semibold">AXONOMETRIC WIREFRAME</span>
         <span style={{ color: 'var(--fg-muted)' }}>|</span>
         {[42, 132, 222, 312].map((ang) => (
           <button
             type="button"
             key={ang}
             onClick={() => setAzimuthDeg(ang)}
-            className="px-2 min-h-[30px] md:min-h-[22px] border cursor-pointer shrink-0"
+            className="px-2.5 min-h-[32px] md:min-h-[24px] rounded border cursor-pointer shrink-0"
             style={{
               borderColor: 'var(--border-hairline)',
-              backgroundColor: Math.abs(azimuthDeg - ang) < 5 ? 'var(--accent-bg)' : 'transparent',
-              color: Math.abs(azimuthDeg - ang) < 5 ? 'var(--accent-fg)' : 'var(--fg-muted)',
+              backgroundColor:
+                Math.abs(azimuthDeg - ang) < 5 ? 'var(--accent-primary)' : 'transparent',
+              color: Math.abs(azimuthDeg - ang) < 5 ? '#ffffff' : 'var(--fg-muted)',
             }}
           >
             {ang}°
@@ -175,10 +187,10 @@ export const WireframeIsoView: React.FC<WireframeIsoViewProps> = ({
             <button
               type="button"
               onClick={() => setDeckGapM((g) => (g > 4 ? 3.2 : 5.4))}
-              className="px-2 min-h-[30px] md:min-h-[22px] border cursor-pointer shrink-0"
+              className="px-2.5 min-h-[32px] md:min-h-[24px] rounded border cursor-pointer shrink-0 font-semibold"
               style={{ borderColor: 'var(--border-hairline)', color: 'var(--fg-primary)' }}
             >
-              {deckGapM > 4 ? 'COMPACT DECKS' : 'EXPLODE DECKS'}
+              {deckGapM > 4 ? 'Compact Decks' : 'Explode Decks'}
             </button>
           </>
         )}
@@ -186,7 +198,7 @@ export const WireframeIsoView: React.FC<WireframeIsoViewProps> = ({
 
       <svg
         viewBox="-420 -270 840 540"
-        className="w-full h-full cursor-grab active:cursor-grabbing"
+        className="w-full h-full cursor-grab active:cursor-grabbing select-none"
         style={{ touchAction: 'none' }}
         onWheel={(e) => {
           e.preventDefault();
@@ -196,11 +208,8 @@ export const WireframeIsoView: React.FC<WireframeIsoViewProps> = ({
         }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
-        onPointerUp={(e) => endPointer(e.pointerId)}
-        onPointerCancel={(e) => endPointer(e.pointerId)}
-        onLostPointerCapture={(e) => endPointer(e.pointerId)}
       >
-        {/* Deck Structural Wireframe Envelopes & 1.0m Grid Lines */}
+        {/* Deck Envelopes & Grid */}
         {Array.from({ length: hull.decks }).map((_, d) => {
           const z0 = d * deckGapM;
           const z1 = z0 + hull.deckHeightM;
@@ -225,13 +234,13 @@ export const WireframeIsoView: React.FC<WireframeIsoViewProps> = ({
                   points={basePts.join(' ')}
                   fill="none"
                   stroke="var(--border-strong)"
-                  strokeWidth="1.2"
+                  strokeWidth="1.4"
                 />
                 <polyline
                   points={topPts.join(' ')}
                   fill="none"
                   stroke="var(--fg-muted)"
-                  strokeWidth="0.8"
+                  strokeWidth="0.9"
                   strokeDasharray="4 4"
                 />
               </g>
@@ -261,7 +270,7 @@ export const WireframeIsoView: React.FC<WireframeIsoViewProps> = ({
                     x2={pB.x}
                     y2={pB.y}
                     stroke="var(--grid-major)"
-                    strokeWidth="0.6"
+                    strokeWidth="0.7"
                   />
                 );
               })}
@@ -276,7 +285,7 @@ export const WireframeIsoView: React.FC<WireframeIsoViewProps> = ({
                     x2={pB.x}
                     y2={pB.y}
                     stroke="var(--grid-major)"
-                    strokeWidth="0.6"
+                    strokeWidth="0.7"
                   />
                 );
               })}
@@ -285,13 +294,13 @@ export const WireframeIsoView: React.FC<WireframeIsoViewProps> = ({
                 points={`${c00.x},${c00.y} ${c10.x},${c10.y} ${c11.x},${c11.y} ${c01.x},${c01.y}`}
                 fill="none"
                 stroke="var(--border-strong)"
-                strokeWidth="1.2"
+                strokeWidth="1.4"
               />
               <polygon
                 points={`${t00.x},${t00.y} ${t10.x},${t10.y} ${t11.x},${t11.y} ${t01.x},${t01.y}`}
                 fill="none"
                 stroke="var(--fg-muted)"
-                strokeWidth="0.7"
+                strokeWidth="0.8"
                 strokeDasharray="4 4"
               />
               {[
@@ -307,7 +316,7 @@ export const WireframeIsoView: React.FC<WireframeIsoViewProps> = ({
                   x2={t.x}
                   y2={t.y}
                   stroke="var(--fg-muted)"
-                  strokeWidth="0.7"
+                  strokeWidth="0.8"
                   strokeDasharray="3 3"
                 />
               ))}
@@ -320,13 +329,13 @@ export const WireframeIsoView: React.FC<WireframeIsoViewProps> = ({
                 fontSize="10"
                 className="font-mono-cad"
               >
-                DECK 0{d + 1} ({hull.deckHeightM}mZ)
+                Deck {d + 1} ({hull.deckHeightM}m)
               </text>
             </g>
           );
         })}
 
-        {/* 3D Projected A* Egress Paths */}
+        {/* 3D Projected Escape Routes */}
         {store.overlays.egress &&
           evaluation.egress.routes.map((route) => {
             const z = route.deck * deckGapM + 0.08;
@@ -342,13 +351,13 @@ export const WireframeIsoView: React.FC<WireframeIsoViewProps> = ({
                 points={pts}
                 fill="none"
                 stroke={route.valid ? '#10b981' : '#ef4444'}
-                strokeWidth={route.valid ? '1.8' : '1.6'}
+                strokeWidth={route.valid ? '2.0' : '1.8'}
                 strokeDasharray={route.valid ? 'none' : '4 3'}
               />
             );
           })}
 
-        {/* Extruded 3D Wireframe Module Prisms */}
+        {/* Extruded 3D Module Prisms */}
         {sortedModules.map((m) => {
           const spec = ZONE_SPECS[m.type];
           const z0 = m.deck * deckGapM;
@@ -378,18 +387,20 @@ export const WireframeIsoView: React.FC<WireframeIsoViewProps> = ({
           return (
             <g
               key={m.id}
-              onClick={(e) => {
-                e.stopPropagation();
-                store.selectModule(m.id);
+              onPointerUp={(e) => {
+                if (!orbitRef.current?.moved) {
+                  e.stopPropagation();
+                  store.selectModule(m.id);
+                }
               }}
               className="cursor-pointer"
             >
               <polygon
                 points={`${b0.x},${b0.y} ${b1.x},${b1.y} ${b2.x},${b2.y} ${b3.x},${b3.y}`}
                 fill={spec.tintHex}
-                fillOpacity="0.14"
+                fillOpacity="0.16"
                 stroke={strokeCol}
-                strokeWidth="0.9"
+                strokeWidth="1.0"
               />
               {[
                 [b0, t0],
@@ -404,15 +415,15 @@ export const WireframeIsoView: React.FC<WireframeIsoViewProps> = ({
                   x2={t.x}
                   y2={t.y}
                   stroke={strokeCol}
-                  strokeWidth={isSelected ? '1.6' : '1.0'}
+                  strokeWidth={isSelected ? '1.8' : '1.1'}
                 />
               ))}
               <polygon
                 points={`${t0.x},${t0.y} ${t1.x},${t1.y} ${t2.x},${t2.y} ${t3.x},${t3.y}`}
                 fill={spec.tintHex}
-                fillOpacity={isSelected ? '0.32' : '0.18'}
+                fillOpacity={isSelected ? '0.35' : '0.20'}
                 stroke={strokeCol}
-                strokeWidth={isSelected || isHighlighted ? '2.0' : '1.2'}
+                strokeWidth={isSelected || isHighlighted ? '2.2' : '1.3'}
               />
               <text
                 x={centerTop.x}

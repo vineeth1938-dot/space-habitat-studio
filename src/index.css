@@ -1,36 +1,38 @@
 @import "tailwindcss";
 
 :root {
-  --bg-canvas: #f5f5f2;
+  --bg-canvas: #f1f5f9;
   --bg-panel: #ffffff;
-  --bg-subtle: #eaeae6;
-  --fg-primary: #0f0f10;
-  --fg-secondary: #3f3f46;
-  --fg-muted: #52525b;
-  --border-hairline: #cfcfc9;
-  --border-strong: #18181b;
-  --grid-minor: #e4e4df;
-  --grid-major: #c6c6bf;
-  --accent-ink: #0f0f10;
-  --accent-bg: #0f0f10;
+  --bg-subtle: #e2e8f0;
+  --bg-elevated: #f8fafc;
+  --fg-primary: #0f172a;
+  --fg-secondary: #334155;
+  --fg-muted: #475569;
+  --border-hairline: #cbd5e1;
+  --border-strong: #0284c7;
+  --grid-minor: #e2e8f0;
+  --grid-major: #cbd5e1;
+  --accent-primary: #0284c7;
+  --accent-primary-hover: #0369a1;
   --accent-fg: #ffffff;
   --focus-ring: #0284c7;
 }
 
 .theme-dark {
-  --bg-canvas: #09090b;
-  --bg-panel: #101013;
-  --bg-subtle: #18181c;
-  --fg-primary: #f4f4f6;
-  --fg-secondary: #d4d4d8;
-  --fg-muted: #a1a1aa;
-  --border-hairline: #27272a;
-  --border-strong: #e4e4e7;
-  --grid-minor: #16161a;
-  --grid-major: #27272a;
-  --accent-ink: #f4f4f6;
-  --accent-bg: #f4f4f6;
-  --accent-fg: #09090b;
+  --bg-canvas: #0b0f19;
+  --bg-panel: #111827;
+  --bg-subtle: #1e293b;
+  --bg-elevated: #172033;
+  --fg-primary: #f8fafc;
+  --fg-secondary: #cbd5e1;
+  --fg-muted: #94a3b8;
+  --border-hairline: #1e293b;
+  --border-strong: #38bdf8;
+  --grid-minor: #131c2e;
+  --grid-major: #1e293b;
+  --accent-primary: #0ea5e9;
+  --accent-primary-hover: #38bdf8;
+  --accent-fg: #082f49;
   --focus-ring: #38bdf8;
 }
 
@@ -39,6 +41,22 @@
   scrollbar-width: thin;
   scrollbar-color: var(--border-hairline) var(--bg-panel);
   -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  overscroll-behavior: none;
+}
+
+/* Eliminate 300ms mobile tap delay & scroll-stealing on all interactive controls */
+button,
+select,
+input,
+a,
+[role="button"] {
+  touch-action: manipulation;
 }
 
 ::selection {
@@ -54,12 +72,12 @@ select {
 
 :focus-visible {
   outline: 2px solid var(--focus-ring);
-  outline-offset: -2px;
+  outline-offset: 1px;
 }
 
 *::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
 }
 
 *::-webkit-scrollbar-track {
@@ -68,6 +86,7 @@ select {
 
 *::-webkit-scrollbar-thumb {
   background: var(--border-hairline);
+  border-radius: 3px;
 }
 
 .no-scrollbar::-webkit-scrollbar {
@@ -84,7 +103,7 @@ select {
 }
 
 .zone-transition {
-  transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: transform 340ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .safe-top {
@@ -100,9 +119,8 @@ select {
   padding-right: env(safe-area-inset-right, 0px);
 }
 
-/* Larger touch slider thumbs on phones and tablets */
 @media (pointer: coarse) {
   input[type="range"] {
-    height: 24px;
+    height: 28px;
   }
 }

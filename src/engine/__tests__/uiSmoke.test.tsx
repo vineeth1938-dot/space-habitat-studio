@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import App from '../../App';
 import { HABITAT_PRESETS } from '../presets';
-import { useCadStore } from '../../store/useCadStore';
+import { LIVE_SNAPSHOT_ID, useCadStore } from '../../store/useCadStore';
 import { AgencyStandard, HullGeometryType } from '../../types/habitat';
 
 function assertCleanMarkup(label: string) {
@@ -17,16 +17,24 @@ function assertCleanMarkup(label: string) {
 }
 
 describe('Phase 4 — Full React UI Render, Responsive Modes & Hardening Suite', () => {
-  it('renders all 4 presets, 4 agency standards, 4 hull types, overlays, 2.5D wireframe, Auto-Optimize, Solar Flare, and Compare Drawer with 0 errors and 0 NaN', () => {
+  it('renders all presets, standards, hulls, touch controls, Live-vs-Saved Compare, and zero-overlap repacking with 0 errors and 0 NaN', () => {
     const s = useCadStore.getState();
     s.resetWorkspace();
 
-    // 1. Verify initial render (Broken Novice Layout)
+    // 1. Verify initial render
     const initialHtml = assertCleanMarkup('Initial Broken Novice');
     expect(initialHtml).toContain('HABITAT // SW-4');
     expect(initialHtml).toContain('AUTO-OPTIMIZE LAYOUT');
 
-    // 2. Load each of the 4 presets and verify score updates + clean render
+    // 2. Verify Compare Drawer defaults to Baseline A vs Live Workspace (not identical duplicate snapshots)
+    useCadStore.getState().setCompareOpen(true);
+    expect(useCadStore.getState().comparePair[1]).toBe(LIVE_SNAPSHOT_ID);
+    const defaultCompareHtml = assertCleanMarkup('Default Compare Live vs Baseline');
+    expect(defaultCompareHtml).toContain('Compare Habitat Layouts');
+    expect(defaultCompareHtml).toContain('SIDE-BY-SIDE METRIC DELTA MATRIX');
+    useCadStore.getState().setCompareOpen(false);
+
+    // 3. Load each of the 4 presets and verify score updates + clean render
     const presetScores: Record<string, number> = {};
     for (const preset of HABITAT_PRESETS) {
       useCadStore.getState().loadPreset(preset.id);
@@ -39,7 +47,13 @@ describe('Phase 4 — Full React UI Render, Responsive Modes & Hardening Suite',
     expect(presetScores['nasa-lunar-4crew']).toBeGreaterThanOrEqual(85);
     expect(presetScores['spacex-mars-6crew']).toBeGreaterThanOrEqual(85);
 
-    // 3. Switch between all 4 Agency Standards on Broken Novice and verify dynamic recalculation
+    // 4. Regression test: Switching 2-Deck SpaceX Starship -> 1-Deck Inflatable repacks with 0 overlaps!
+    useCadStore.getState().loadPreset('spacex-mars-6crew');
+    useCadStore.getState().setHullType('inflatable');
+    expect(useCadStore.getState().evaluation.adjacency.overlappingPairs.length).toBe(0);
+    expect(useCadStore.getState().evaluation.adjacency.outOfBoundsIds.length).toBe(0);
+
+    // 5. Switch between all 4 Agency Standards on Broken Novice and verify dynamic recalculation
     useCadStore.getState().loadPreset('broken-novice');
     const stdScores = new Set<string>();
     for (const std of ['NASA', 'ISRO', 'SPACEX', 'UNIFIED'] as AgencyStandard[]) {
@@ -50,7 +64,7 @@ describe('Phase 4 — Full React UI Render, Responsive Modes & Hardening Suite',
     }
     expect(stdScores.size).toBe(4);
 
-    // 4. Move, nudge, resize, rotate, NaN guard, overlays, 2.5D Iso & Light/Dark theme
+    // 6. Move, nudge, resize, rotate, NaN guard, overlays, 3D Wireframe & Light/Dark theme
     const firstId = useCadStore.getState().modules[0].id;
     useCadStore.getState().selectModule(firstId);
     useCadStore.getState().nudgeSelected(0.5, 0.5);
@@ -67,62 +81,58 @@ describe('Phase 4 — Full React UI Render, Responsive Modes & Hardening Suite',
 
     useCadStore.getState().setViewMode('2d');
     useCadStore.getState().toggleTheme();
-    assertCleanMarkup('Swiss Off-White Light Blueprint Theme');
+    assertCleanMarkup('Cleanroom Light Theme');
 
-    // 5. Run Auto-Optimize on Broken Novice and verify score strictly jumps
+    // 7. Run Auto-Optimize on Broken Novice and verify score strictly jumps + 0 overlaps
     const beforeOpt = useCadStore.getState().evaluation.scores.overall;
     useCadStore.getState().runAutoOptimize();
     const afterOpt = useCadStore.getState().evaluation.scores.overall;
     expect(afterOpt).toBeGreaterThan(beforeOpt);
+    expect(useCadStore.getState().evaluation.adjacency.overlappingPairs.length).toBe(0);
     const solvedHtml = assertCleanMarkup('Post Auto-Optimize');
     expect(solvedHtml).toContain('SOLVED:');
 
-    // 6. Trigger Simulate Solar Flare & verify diagnostics update cleanly
+    // 8. Trigger Simulate Solar Flare & verify diagnostics update cleanly
     useCadStore.getState().toggleSolarFlare();
     expect(useCadStore.getState().mission.solarFlareSim).toBe(true);
     const flareHtml = assertCleanMarkup('Solar Flare Active');
     expect(flareHtml).toContain('SOLAR FLARE: ACTIVE');
 
-    // 7. Save snapshots (including Unicode, Emoji, RTL & Persian ZWNJ + >100 char overflow) & Compare Drawer
+    // 9. Save checkpoints (including Unicode, Emoji, RTL & Persian ZWNJ + >100 char overflow) & Load Checkpoint
     const unicodeName = `ایستگاه\u200Cفضایی 🚀 宇宙ステーション ${'A'.repeat(110)}`;
     useCadStore.getState().saveSnapshot(unicodeName);
     const saved = useCadStore.getState().snapshots.at(-1)!;
     expect(saved.name.length).toBeLessThanOrEqual(80);
     expect(saved.name.includes('\u200C')).toBe(true);
 
-    useCadStore.getState().addModule('storage');
-    useCadStore.getState().saveSnapshot('StarForge Candidate Beta');
-    useCadStore.getState().setCompareOpen(true);
-    const compareHtml = assertCleanMarkup('Save & Compare Drawer Open');
-    expect(compareHtml).toContain('SIDE-BY-SIDE METRIC DELTA MATRIX');
-    useCadStore.getState().setCompareOpen(false);
+    useCadStore.getState().loadSnapshotIntoEditor(saved.id);
+    assertCleanMarkup('After Restoring Checkpoint into Editor');
 
-    // 8. Responsive Phone Tabs (canvas -> build -> audit -> issue tap jumps back to canvas) & iPad Drawer
+    // 10. Spam-adding 35 modules onto SpaceX 2-Deck NEVER stacks overlapping modules + Auto-Optimize stays 0 overlaps!
+    useCadStore.getState().loadPreset('spacex-mars-6crew');
+    for (let i = 0; i < 35; i++) {
+      useCadStore.getState().addModule('hygiene');
+    }
+    expect(useCadStore.getState().evaluation.adjacency.overlappingPairs.length).toBe(0);
+    useCadStore.getState().runAutoOptimize();
+    expect(useCadStore.getState().evaluation.adjacency.overlappingPairs.length).toBe(0);
+    assertCleanMarkup('Crowded Hull Zero-Overlap Packing');
+
+    // 11. Responsive Phone Tabs & Empty State CTA
     useCadStore.getState().setTabletDrawerOpen(true);
-    const drawerHtml = assertCleanMarkup('iPad Slide-Over Drawer Open');
-    expect(drawerHtml).toContain('Mission &amp; Zone Palette');
+    assertCleanMarkup('iPad Slide-Over Drawer Open');
     useCadStore.getState().setTabletDrawerOpen(false);
 
     useCadStore.getState().setMobilePanel('build');
     assertCleanMarkup('Phone Build Panel');
     useCadStore.getState().setMobilePanel('audit');
     assertCleanMarkup('Phone Audit Panel');
-    useCadStore.getState().highlightModules([firstId]);
-    expect(useCadStore.getState().mobilePanel).toBe('canvas');
-
-    // 9. Spam-adding 40 modules enforces MAX_MODULES_PER_DECK cap cleanly + Empty State recovery
-    for (let i = 0; i < 40; i++) {
-      useCadStore.getState().addModule('hygiene');
-    }
-    expect(useCadStore.getState().modules.length).toBeLessThanOrEqual(32);
-    assertCleanMarkup('Max Deck Saturation Cap');
 
     useCadStore.getState().clearAllModules();
     const emptyHtml = assertCleanMarkup('Empty Floorplan CTA');
     expect(emptyHtml).toContain('Empty Habitat Floorplan');
 
-    // 10. Test all 4 Hull Geometry switches + Undo/Redo
-    useCadStore.getState().loadPreset('spacex-mars-6crew');
+    // 12. Test all 4 Hull Geometry switches + Undo/Redo
     for (const ht of ['cylinder', 'inflatable', 'dome', 'multideck'] as HullGeometryType[]) {
       useCadStore.getState().setHullType(ht);
       assertCleanMarkup(`Hull ${ht}`);

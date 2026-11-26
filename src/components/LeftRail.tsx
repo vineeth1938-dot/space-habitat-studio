@@ -27,7 +27,12 @@ export const LeftRail: React.FC<LeftRailProps> = ({ variant = 'desktop' }) => {
     clearNotice,
   } = useCadStore();
 
-  const hullTypes: HullGeometryType[] = ['cylinder', 'inflatable', 'dome', 'multideck'];
+  const hullTypes: Array<{ id: HullGeometryType; title: string }> = [
+    { id: 'cylinder', title: 'Rigid Cylinder' },
+    { id: 'inflatable', title: 'Inflatable Hab' },
+    { id: 'dome', title: 'Lunar Dome' },
+    { id: 'multideck', title: '2-Deck Starship' },
+  ];
   const isMobile = variant === 'mobile';
   const isDrawer = variant === 'drawer';
 
@@ -49,20 +54,20 @@ export const LeftRail: React.FC<LeftRailProps> = ({ variant = 'desktop' }) => {
         color: 'var(--fg-primary)',
       }}
     >
-      {/* Optional Drawer Header for iPad */}
+      {/* iPad Drawer Header */}
       {isDrawer && (
         <div
-          className="h-11 px-3 border-b flex items-center justify-between shrink-0"
+          className="h-12 px-3.5 border-b flex items-center justify-between shrink-0"
           style={{ borderColor: 'var(--border-hairline)' }}
         >
-          <h2 className="font-mono-cad text-xs font-bold uppercase tracking-wider">
+          <h2 className="text-xs font-bold uppercase tracking-wider">
             Mission &amp; Zone Palette
           </h2>
           <button
             type="button"
             onClick={() => setTabletDrawerOpen(false)}
             aria-label="Close Palette Drawer"
-            className="w-8 h-8 border flex items-center justify-center cursor-pointer"
+            className="w-9 h-9 rounded-md border flex items-center justify-center cursor-pointer"
             style={{ borderColor: 'var(--border-hairline)' }}
           >
             <X className="w-4 h-4" />
@@ -70,71 +75,68 @@ export const LeftRail: React.FC<LeftRailProps> = ({ variant = 'desktop' }) => {
         </div>
       )}
 
-      {/* Mobile Feedback Banner when Adding Zones */}
+      {/* Mobile Feedback Banner */}
       {isMobile && statusNotice && (
         <div
-          className="px-3 py-2.5 border-b flex items-center justify-between gap-2 text-xs shrink-0"
+          className="px-3.5 py-2.5 border-b flex items-center justify-between gap-2 text-xs shrink-0"
           style={{
             borderColor: 'var(--border-strong)',
-            backgroundColor: 'var(--bg-subtle)',
+            backgroundColor: 'var(--bg-elevated)',
           }}
         >
-          <span className="font-mono-cad truncate">{statusNotice}</span>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => {
-                clearNotice();
-                setMobilePanel('canvas');
-              }}
-              className="px-2.5 py-1.5 border font-mono-cad text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-              style={{
-                backgroundColor: 'var(--accent-bg)',
-                color: 'var(--accent-fg)',
-                borderColor: 'var(--border-strong)',
-              }}
-            >
-              <span>BLUEPRINT</span>
-              <ArrowRight className="w-3 h-3" />
-            </button>
-          </div>
+          <span className="truncate font-medium">{statusNotice}</span>
+          <button
+            type="button"
+            onClick={() => {
+              clearNotice();
+              setMobilePanel('canvas');
+            }}
+            className="px-3 h-9 rounded-md text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0"
+            style={{
+              backgroundColor: 'var(--accent-primary)',
+              color: '#ffffff',
+            }}
+          >
+            <span>View Floorplan</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
       {/* Mission & Hull Parameters */}
       <div
-        className="p-3 border-b space-y-3 shrink-0"
+        className="p-3.5 border-b space-y-3 shrink-0"
         style={{ borderColor: 'var(--border-hairline)' }}
       >
         <div className="flex items-center justify-between">
           <h2 className="text-xs font-bold uppercase tracking-wider">
-            Mission Parameters
+            Mission Setup
           </h2>
-          <span className="font-mono-cad text-[11px]" style={{ color: 'var(--fg-secondary)' }}>
-            NHV {evaluation.volume.netHabitableVolumeM3}m³
+          <span className="font-mono-cad text-xs font-semibold" style={{ color: 'var(--accent-primary)' }}>
+            {evaluation.volume.netHabitableVolumeM3} m³ NHV
           </span>
         </div>
 
-        {/* Crew Size: 1 - 12 */}
+        {/* Crew Size */}
         <div>
           <div className="flex items-center justify-between text-xs mb-1">
-            <span style={{ color: 'var(--fg-secondary)' }}>Crew Complement</span>
-            <span className="font-mono-cad font-bold">{mission.crewSize} CREW</span>
+            <span style={{ color: 'var(--fg-secondary)' }}>Crew Size</span>
+            <span className="font-mono-cad font-bold">{mission.crewSize} Astronauts</span>
           </div>
           <input
             data-testid="crew-slider"
-            aria-label="Crew Complement"
+            aria-label="Crew Size"
             type="range"
             min={1}
             max={12}
             step={1}
             value={mission.crewSize}
             onChange={(e) => setCrewSize(Number(e.target.value))}
-            className="w-full cursor-pointer accent-current"
+            className="w-full cursor-pointer accent-sky-500"
           />
         </div>
 
-        {/* Mission Duration: 3 - 1000 days */}
+        {/* Mission Duration */}
         <div>
           <div className="flex items-center justify-between text-xs mb-1.5 gap-2">
             <span style={{ color: 'var(--fg-secondary)' }}>Duration</span>
@@ -144,12 +146,12 @@ export const LeftRail: React.FC<LeftRailProps> = ({ variant = 'desktop' }) => {
                   type="button"
                   key={d}
                   onClick={() => setDurationDays(d)}
-                  className="px-2 min-h-[32px] md:min-h-[22px] text-[11px] md:text-[10px] border cursor-pointer"
+                  className="px-2 min-h-[34px] md:min-h-[24px] rounded text-[11px] border cursor-pointer"
                   style={{
                     borderColor: 'var(--border-hairline)',
                     backgroundColor:
-                      mission.durationDays === d ? 'var(--accent-bg)' : 'transparent',
-                    color: mission.durationDays === d ? 'var(--accent-fg)' : 'var(--fg-muted)',
+                      mission.durationDays === d ? 'var(--accent-primary)' : 'transparent',
+                    color: mission.durationDays === d ? '#ffffff' : 'var(--fg-muted)',
                   }}
                 >
                   {d}d
@@ -167,45 +169,45 @@ export const LeftRail: React.FC<LeftRailProps> = ({ variant = 'desktop' }) => {
             step={1}
             value={mission.durationDays}
             onChange={(e) => setDurationDays(Number(e.target.value))}
-            className="w-full cursor-pointer accent-current"
+            className="w-full cursor-pointer accent-sky-500"
           />
         </div>
 
-        {/* Hull Geometry Selector */}
+        {/* Hull Geometry */}
         <div>
           <div className="flex items-center justify-between text-xs mb-1.5">
-            <span style={{ color: 'var(--fg-secondary)' }}>Hull Geometry</span>
-            <span className="font-mono-cad text-[11px]">
+            <span style={{ color: 'var(--fg-secondary)' }}>Hull Shape</span>
+            <span className="font-mono-cad text-xs">
               {mission.hull.widthM}×{mission.hull.depthM}m
-              {mission.hull.decks > 1 ? ` ×${mission.hull.decks}D` : ''}
+              {mission.hull.decks > 1 ? ` · ${mission.hull.decks} Decks` : ''}
             </span>
           </div>
           <div className="grid grid-cols-2 gap-1.5">
             {hullTypes.map((ht) => {
-              const active = mission.hull.type === ht;
+              const active = mission.hull.type === ht.id;
               return (
                 <button
                   type="button"
-                  key={ht}
-                  data-testid={`hull-${ht}`}
-                  onClick={() => setHullType(ht)}
-                  className="px-2.5 min-h-[40px] md:min-h-[28px] text-left font-mono-cad text-[11px] md:text-[10px] border truncate cursor-pointer"
+                  key={ht.id}
+                  data-testid={`hull-${ht.id}`}
+                  onClick={() => setHullType(ht.id)}
+                  title={HULL_TEMPLATES[ht.id].label}
+                  className="px-2.5 min-h-[42px] md:min-h-[30px] rounded-md text-left text-xs border truncate cursor-pointer font-medium transition-colors"
                   style={{
                     borderColor: active ? 'var(--border-strong)' : 'var(--border-hairline)',
-                    backgroundColor: active ? 'var(--accent-bg)' : 'var(--bg-subtle)',
-                    color: active ? 'var(--accent-fg)' : 'var(--fg-secondary)',
+                    backgroundColor: active ? 'var(--accent-primary)' : 'var(--bg-subtle)',
+                    color: active ? '#ffffff' : 'var(--fg-secondary)',
                   }}
                 >
-                  {HULL_TEMPLATES[ht].label.split(' ')[0].toUpperCase()}
-                  {ht === 'multideck' ? ' STACK' : ht === 'inflatable' ? ' HAB' : ''}
+                  {ht.title}
                 </button>
               );
             })}
           </div>
         </div>
 
-        {/* Hull Dimension Steppers + Multi-Deck Switcher */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5 font-mono-cad text-xs md:text-[11px]">
+        {/* Hull Dimension Steppers */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5 font-mono-cad text-xs">
           <div className="flex items-center gap-1">
             <span style={{ color: 'var(--fg-muted)' }}>W:</span>
             <button
@@ -214,20 +216,20 @@ export const LeftRail: React.FC<LeftRailProps> = ({ variant = 'desktop' }) => {
               onClick={() =>
                 setHullDimensions(mission.hull.widthM - 0.5, mission.hull.depthM)
               }
-              className="w-8 h-8 md:w-6 md:h-6 border flex items-center justify-center cursor-pointer"
-              style={{ borderColor: 'var(--border-hairline)' }}
+              className="w-9 h-9 md:w-6 md:h-6 rounded border flex items-center justify-center cursor-pointer"
+              style={{ borderColor: 'var(--border-hairline)', backgroundColor: 'var(--bg-subtle)' }}
             >
               -
             </button>
-            <span className="w-8 text-center">{mission.hull.widthM.toFixed(1)}</span>
+            <span className="w-9 text-center">{mission.hull.widthM.toFixed(1)}m</span>
             <button
               type="button"
               aria-label="Increase Hull Width"
               onClick={() =>
                 setHullDimensions(mission.hull.widthM + 0.5, mission.hull.depthM)
               }
-              className="w-8 h-8 md:w-6 md:h-6 border flex items-center justify-center cursor-pointer"
-              style={{ borderColor: 'var(--border-hairline)' }}
+              className="w-9 h-9 md:w-6 md:h-6 rounded border flex items-center justify-center cursor-pointer"
+              style={{ borderColor: 'var(--border-hairline)', backgroundColor: 'var(--bg-subtle)' }}
             >
               +
             </button>
@@ -242,20 +244,20 @@ export const LeftRail: React.FC<LeftRailProps> = ({ variant = 'desktop' }) => {
                 onClick={() =>
                   setHullDimensions(mission.hull.widthM, mission.hull.depthM - 0.5)
                 }
-                className="w-8 h-8 md:w-6 md:h-6 border flex items-center justify-center cursor-pointer"
-                style={{ borderColor: 'var(--border-hairline)' }}
+                className="w-9 h-9 md:w-6 md:h-6 rounded border flex items-center justify-center cursor-pointer"
+                style={{ borderColor: 'var(--border-hairline)', backgroundColor: 'var(--bg-subtle)' }}
               >
                 -
               </button>
-              <span className="w-8 text-center">{mission.hull.depthM.toFixed(1)}</span>
+              <span className="w-9 text-center">{mission.hull.depthM.toFixed(1)}m</span>
               <button
                 type="button"
                 aria-label="Increase Hull Depth"
                 onClick={() =>
                   setHullDimensions(mission.hull.widthM, mission.hull.depthM + 0.5)
                 }
-                className="w-8 h-8 md:w-6 md:h-6 border flex items-center justify-center cursor-pointer"
-                style={{ borderColor: 'var(--border-hairline)' }}
+                className="w-9 h-9 md:w-6 md:h-6 rounded border flex items-center justify-center cursor-pointer"
+                style={{ borderColor: 'var(--border-hairline)', backgroundColor: 'var(--bg-subtle)' }}
               >
                 +
               </button>
@@ -263,16 +265,19 @@ export const LeftRail: React.FC<LeftRailProps> = ({ variant = 'desktop' }) => {
           )}
 
           {mission.hull.decks > 1 && (
-            <div className="flex border" style={{ borderColor: 'var(--border-hairline)' }}>
+            <div
+              className="flex rounded overflow-hidden border"
+              style={{ borderColor: 'var(--border-hairline)' }}
+            >
               {Array.from({ length: mission.hull.decks }).map((_, d) => (
                 <button
                   type="button"
                   key={d}
                   onClick={() => setActiveDeck(d)}
-                  className="px-2.5 h-8 md:h-6 text-[11px] md:text-[10px] cursor-pointer"
+                  className="px-2.5 h-9 md:h-6 text-xs cursor-pointer font-bold"
                   style={{
-                    backgroundColor: activeDeck === d ? 'var(--accent-bg)' : 'transparent',
-                    color: activeDeck === d ? 'var(--accent-fg)' : 'var(--fg-muted)',
+                    backgroundColor: activeDeck === d ? 'var(--accent-primary)' : 'transparent',
+                    color: activeDeck === d ? '#ffffff' : 'var(--fg-muted)',
                   }}
                 >
                   D{d + 1}
@@ -284,24 +289,23 @@ export const LeftRail: React.FC<LeftRailProps> = ({ variant = 'desktop' }) => {
       </div>
 
       {/* Zone Module Palette */}
-      <div className={isMobile ? 'flex-1' : 'flex-1 flex flex-col min-h-0 overflow-hidden'}>
+      <div className={isMobile ? 'flex-1 pb-4' : 'flex-1 flex flex-col min-h-0 overflow-hidden'}>
         <div
-          className="px-3 py-2 border-b flex items-center justify-between shrink-0"
+          className="px-3.5 py-2.5 border-b flex items-center justify-between shrink-0"
           style={{ borderColor: 'var(--border-hairline)' }}
         >
           <h2 className="text-xs font-bold uppercase tracking-wider">
-            Zone Palette (0.5m)
+            Habitat Modules
           </h2>
           {modules.length > 0 && (
             <button
               type="button"
               onClick={clearAllModules}
-              title="Clear all placed modules"
-              className="flex items-center gap-1 font-mono-cad text-[10px] px-1.5 py-0.5 border cursor-pointer"
+              className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border cursor-pointer"
               style={{ borderColor: 'var(--border-hairline)', color: 'var(--fg-muted)' }}
             >
               <Trash2 className="w-3 h-3" />
-              CLEAR
+              Clear All
             </button>
           )}
         </div>
@@ -315,31 +319,19 @@ export const LeftRail: React.FC<LeftRailProps> = ({ variant = 'desktop' }) => {
               key={spec.type}
               draggable={!isMobile}
               onDragStart={(e) => handleDragStart(e, spec.type)}
-              className="px-3 py-2.5 md:py-2 flex items-center justify-between gap-2 md:cursor-grab md:active:cursor-grabbing"
+              className="px-3.5 py-3 md:py-2.5 flex items-center justify-between gap-2.5 md:cursor-grab md:active:cursor-grabbing"
               style={{ borderColor: 'var(--border-hairline)' }}
             >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span
-                    className="w-2.5 h-2.5 shrink-0 border"
-                    style={{
-                      backgroundColor: spec.tintHex,
-                      borderColor: 'var(--border-strong)',
-                    }}
+                    className="w-3 h-3 rounded-sm shrink-0"
+                    style={{ backgroundColor: spec.tintHex }}
                   />
-                  <span
-                    className="font-mono-cad text-[10px] px-1 border shrink-0"
-                    style={{
-                      borderColor: 'var(--border-hairline)',
-                      color: 'var(--fg-muted)',
-                    }}
-                  >
-                    {spec.code}
-                  </span>
                   <span className="text-sm md:text-xs font-semibold truncate">{spec.label}</span>
                 </div>
                 <div
-                  className="font-mono-cad text-[11px] md:text-[10px] mt-0.5 truncate"
+                  className="text-xs md:text-[11px] mt-0.5 truncate"
                   style={{ color: 'var(--fg-muted)' }}
                 >
                   {spec.defaultW}×{spec.defaultH}m · {spec.sourceDba} dBA
@@ -350,16 +342,15 @@ export const LeftRail: React.FC<LeftRailProps> = ({ variant = 'desktop' }) => {
                 type="button"
                 data-testid={`add-zone-${spec.type}`}
                 onClick={() => addModule(spec.type)}
-                title={`Place ${spec.label} on Deck ${activeDeck + 1}`}
-                className="shrink-0 px-3 min-h-[40px] md:min-h-[28px] md:px-2 border font-mono-cad text-xs md:text-[10px] font-semibold flex items-center gap-1 cursor-pointer active:opacity-80"
+                className="shrink-0 px-3.5 min-h-[42px] md:min-h-[30px] md:px-2.5 rounded-md border text-xs font-semibold flex items-center gap-1 cursor-pointer active:scale-95 transition-transform"
                 style={{
                   borderColor: 'var(--border-hairline)',
                   backgroundColor: 'var(--bg-subtle)',
                   color: 'var(--fg-primary)',
                 }}
               >
-                <Plus className="w-3.5 h-3.5 md:w-3 md:h-3" />
-                ADD
+                <Plus className="w-4 h-4 md:w-3.5 md:h-3.5" />
+                Add
               </button>
             </div>
           ))}

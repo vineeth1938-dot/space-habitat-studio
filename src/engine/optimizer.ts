@@ -19,7 +19,7 @@ export interface OptimizationResult {
 }
 
 const MAX_SA_ITERATIONS = 1500;
-const MAX_TIMEOUT_MS = 220; // Hard deterministic responsiveness guard so UI never freezes
+const MAX_TIMEOUT_MS = 220;
 
 function mulberry32(seed: number) {
   let a = seed >>> 0;
@@ -32,10 +32,17 @@ function mulberry32(seed: number) {
   };
 }
 
-/**
- * Fast O(N^2) surrogate cost function for Simulated Annealing inner iterations.
- * Lower cost = higher multi-agency compliance.
- */
+function hasAnyCollisionOrOob(mission: MissionConfig, modules: ZoneModule[]): boolean {
+  const { hull } = mission;
+  for (let i = 0; i < modules.length; i++) {
+    if (!isModuleInHull(modules[i], hull)) return true;
+    for (let j = i + 1; j < modules.length; j++) {
+      if (overlapArea2D(modules[i], modules[j]) > 0.001) return true;
+    }
+  }
+  return false;
+}
+
 function fastEnergy(mission: MissionConfig, modules: ZoneModule[]): number {
   const { hull } = mission;
   const midY = hull.depthM / 2;
@@ -47,13 +54,12 @@ function fastEnergy(mission: MissionConfig, modules: ZoneModule[]): number {
 
   for (const m of modules) {
     if (!isModuleInHull(m, hull)) {
-      cost += 900;
+      cost += 1200;
     }
     if (m.type === 'sleep') sleepMods.push(m);
     if (m.type === 'storage') storageMods.push(m);
     if (m.type === 'airlock') airlockMods.push(m);
 
-    // Keep a >= 1.0m central main spine corridor open along midY (except airlock at end wall)
     if (m.type !== 'airlock') {
       const cTop = midY - 0.6;
       const cBot = midY + 0.6;
@@ -62,27 +68,22 @@ function fastEnergy(mission: MissionConfig, modules: ZoneModule[]): number {
         cost += spineOverlap * 160;
       }
 
-      // Encourage flush wall placement (reduces SpaceX trapped dead pockets & maximizes ECLSS >=1.0m aisle)
       const distWallY = Math.min(m.y, Math.max(0, hull.depthM - (m.y + m.h)));
       if (hull.type !== 'dome') {
         cost += distWallY * 22;
       }
     }
 
-    // Spatial zoning along X: Sleep & Storage on quiet port end; Exercise & Hygiene on active starboard end;
-    // Airlock near center-right for ISRO <= 12m rapid escape from both Sleep and Work/ECLSS
     const normX = (m.x + m.w / 2) / Math.max(1, hull.widthM);
     if (m.type === 'sleep') {
       cost += normX * 26;
     } else if (m.type === 'exercise') {
       cost += (1 - normX) * 28;
     } else if (m.type === 'eclss') {
-      // Mid-right so it's far from Sleep yet <=12m from Airlock
       cost += Math.abs(normX - 0.68) * 22;
     }
   }
 
-  // Pairwise constraints
   for (let i = 0; i < modules.length; i++) {
     const a = modules[i];
     const specA = ZONE_SPECS[a.type];
@@ -92,13 +93,12 @@ function fastEnergy(mission: MissionConfig, modules: ZoneModule[]): number {
 
       const ov = overlapArea2D(a, b);
       if (ov > 0.001) {
-        cost += 800 + ov * 400;
+        cost += 2000 + ov * 800;
       }
 
       if (a.deck === b.deck) {
         const dist = edgeDistance2D(a, b);
 
-        // Acoustic separation: Exercise (72 dBA) & ECLSS (65 dBA) away from Sleep
         const checkNoise = (dba: number) => {
           const minTarget = dba >= 70 ? 4.5 : 3.0;
           if (dist < minTarget) {
@@ -108,7 +108,6 @@ function fastEnergy(mission: MissionConfig, modules: ZoneModule[]): number {
         if (specA.sourceDba >= 62 && b.type === 'sleep') checkNoise(specA.sourceDba);
         if (specB.sourceDba >= 62 && a.type === 'sleep') checkNoise(specB.sourceDba);
 
-        // Hygiene odor separation (>= 1.5m from Galley & Sleep, >= 1.0m between dual Hygienes)
         const isHygSens =
           (a.type === 'hygiene' && (b.type === 'galley' || b.type === 'sleep')) ||
           (b.type === 'hygiene' && (a.type === 'galley' || a.type === 'sleep'));
@@ -119,7 +118,6 @@ function fastEnergy(mission: MissionConfig, modules: ZoneModule[]): number {
           cost += 65;
         }
 
-        // ISRO rapid escape: keep Sleep & ECLSS within ~9.5m Euclidean of an Airlock
         if (
           (a.type === 'airlock' && (b.type === 'sleep' || b.type === 'eclss')) ||
           (b.type === 'airlock' && (a.type === 'sleep' || a.type === 'eclss'))
@@ -132,7 +130,6 @@ function fastEnergy(mission: MissionConfig, modules: ZoneModule[]): number {
     }
   }
 
-  // SpaceX SPE Mass Shielding attraction: pull Storage/Water right next to Sleep (dist <= 0.5m)
   for (const slp of sleepMods) {
     const sameDeckSto = storageMods.filter((s) => s.deck === slp.deck);
     if (sameDeckSto.length > 0) {
@@ -146,7 +143,6 @@ function fastEnergy(mission: MissionConfig, modules: ZoneModule[]): number {
     }
   }
 
-  // Ensure Airlock doorway is not boxed in on all sides
   for (const air of airlockMods) {
     let crowding = 0;
     for (const other of modules) {
@@ -161,59 +157,71 @@ function fastEnergy(mission: MissionConfig, modules: ZoneModule[]): number {
 }
 
 /**
- * Deterministic corridor-first constructive packer to seed Simulated Annealing.
- * Places Sleep + Storage water-shield on the quiet side, Galley/Medical mid-hull,
- * ECLSS/Exercise/Hygiene on the active side, and preserves a clear >= 1.0m central spine.
+ * Packs modules into the hull across all available decks without overlaps.
+ * Also exported so hull-geometry switches can safely repack displaced modules.
  */
-function buildCleanSeedLayout(mission: MissionConfig, sourceModules: ZoneModule[]): ZoneModule[] {
+export function buildCleanSeedLayout(
+  mission: MissionConfig,
+  sourceModules: ZoneModule[]
+): ZoneModule[] {
   const { hull } = mission;
   const cloned = sourceModules.map((m) => clampModuleToHull({ ...m }, hull));
 
   const priority: Record<string, number> = {
-    sleep: 0,
-    storage: 1,
-    galley: 2,
-    medical: 3,
-    airlock: 4,
+    airlock: 0,
+    sleep: 1,
+    storage: 2,
+    galley: 3,
+    medical: 4,
     eclss: 5,
-    hygiene: 6,
-    exercise: 7,
+    exercise: 6,
+    hygiene: 7,
   };
 
-  for (let d = 0; d < hull.decks; d++) {
-    const deckMods = cloned.filter((m) => m.deck === d);
-    deckMods.sort((a, b) => (priority[a.type] ?? 5) - (priority[b.type] ?? 5));
+  cloned.sort((a, b) => (priority[a.type] ?? 5) - (priority[b.type] ?? 5));
 
-    const placed: ZoneModule[] = [];
+  const placed: ZoneModule[] = [];
 
-    for (const mod of deckMods) {
-      // Candidate orientations: current & rotated 90 deg
-      const orientations: Array<{ w: number; h: number; rot: 0 | 90 }> = [
-        { w: mod.w, h: mod.h, rot: mod.rotation },
-      ];
-      if (mod.w !== mod.h) {
-        orientations.push({
-          w: mod.h,
-          h: mod.w,
-          rot: mod.rotation === 0 ? 90 : 0,
-        });
+  for (const mod of cloned) {
+    const spec = ZONE_SPECS[mod.type];
+
+    // Try preferred deck first, then spillover to other decks if hull has multiple decks
+    const deckOrder: number[] = [mod.deck];
+    for (let d = 0; d < hull.decks; d++) {
+      if (d !== mod.deck) deckOrder.push(d);
+    }
+
+    // Candidate footprints: current w×h (0° and 90°), then compact minW×minH if deck is crowded
+    const sizeCandidates: Array<{ w: number; h: number; rot: 0 | 90 }> = [
+      { w: mod.w, h: mod.h, rot: mod.rotation },
+    ];
+    if (mod.w !== mod.h) {
+      sizeCandidates.push({ w: mod.h, h: mod.w, rot: mod.rotation === 0 ? 90 : 0 });
+    }
+    if (mod.w > spec.minW || mod.h > spec.minH) {
+      sizeCandidates.push({ w: spec.minW, h: spec.minH, rot: 0 });
+      if (spec.minW !== spec.minH) {
+        sizeCandidates.push({ w: spec.minH, h: spec.minW, rot: 90 });
       }
+    }
 
-      let bestCandidate: ZoneModule | null = null;
-      let bestScore = Infinity;
+    let bestCandidate: ZoneModule | null = null;
+    let bestScore = Infinity;
 
-      for (const ori of orientations) {
-        for (let y = 0; y <= hull.depthM - ori.h + 1e-6; y += GRID_STEP_M) {
-          for (let x = 0; x <= hull.widthM - ori.w + 1e-6; x += GRID_STEP_M) {
+    for (const d of deckOrder) {
+      for (const sz of sizeCandidates) {
+        for (let y = 0; y <= hull.depthM - sz.h + 1e-6; y += GRID_STEP_M) {
+          for (let x = 0; x <= hull.widthM - sz.w + 1e-6; x += GRID_STEP_M) {
             const sx = snapGrid(x);
             const sy = snapGrid(y);
             const probe: ZoneModule = {
               ...mod,
+              deck: d,
               x: sx,
               y: sy,
-              w: ori.w,
-              h: ori.h,
-              rotation: ori.rot,
+              w: sz.w,
+              h: sz.h,
+              rotation: sz.rot,
             };
             if (!isModuleInHull(probe, hull)) continue;
             if (placed.some((p) => overlapArea2D(probe, p) > 0.001)) continue;
@@ -226,23 +234,18 @@ function buildCleanSeedLayout(mission: MissionConfig, sourceModules: ZoneModule[
           }
         }
       }
-
-      if (bestCandidate) {
-        Object.assign(mod, bestCandidate);
-      }
-      placed.push(mod);
+      if (bestCandidate) break;
     }
+
+    if (bestCandidate) {
+      Object.assign(mod, bestCandidate);
+    }
+    placed.push(mod);
   }
 
   return cloned;
 }
 
-/**
- * Bounded Simulated Annealing Multi-Agency Habitat Layout Optimizer.
- * - Max 1,500 iterations
- * - Hard wall-clock timeout guard (220ms)
- * - Strictly non-degrading: returns best verified candidate with 0 overlaps & 0 OOB when feasible.
- */
 export function autoOptimizeHabitat(
   rawMission: MissionConfig,
   modules: ZoneModule[],
@@ -266,7 +269,9 @@ export function autoOptimizeHabitat(
   const clampedInitial = modules.map((m) => clampModuleToHull({ ...m }, mission.hull));
   const constructiveSeed = buildCleanSeedLayout(mission, clampedInitial);
 
-  const seeds: ZoneModule[][] = [constructiveSeed, clampedInitial];
+  const seeds: ZoneModule[][] = hasAnyCollisionOrOob(mission, clampedInitial)
+    ? [constructiveSeed]
+    : [constructiveSeed, clampedInitial];
 
   let bestModules = modules.map((m) => ({ ...m }));
   let bestEval = before;
@@ -286,7 +291,6 @@ export function autoOptimizeHabitat(
     return candFails < refFails;
   };
 
-  // Evaluate constructive seed immediately
   const seedEval = evaluateHabitatLayout(mission, constructiveSeed);
   if (isBetterEval(seedEval, bestEval)) {
     bestEval = seedEval;
@@ -316,27 +320,43 @@ export function autoOptimizeHabitat(
       const roll = rng();
 
       if (roll < 0.68) {
-        // Snap-grid translation
         const maxSteps = temp > 25 ? 6 : 2;
         const dx = Math.round((rng() * 2 - 1) * maxSteps) * GRID_STEP_M;
         const dy = Math.round((rng() * 2 - 1) * maxSteps) * GRID_STEP_M;
-        current[idx] = clampModuleToHull(
+        const moved = clampModuleToHull(
           { ...orig, x: orig.x + dx, y: orig.y + dy },
           mission.hull
         );
+        // Hard collision rejection so SA never introduces overlapping modules
+        const collides = current.some(
+          (other, j) => j !== idx && overlapArea2D(moved, other) > 0.001
+        );
+        if (collides || !isModuleInHull(moved, mission.hull)) {
+          temp *= cooling;
+          continue;
+        }
+        current[idx] = moved;
       } else if (roll < 0.86 && current.length >= 2) {
-        // Module position swap
         const idx2 = Math.floor(rng() * current.length);
         if (idx2 !== idx) {
           const orig2 = { ...current[idx2] };
-          current[idx] = clampModuleToHull(
+          const swap1 = clampModuleToHull(
             { ...orig, x: orig2.x, y: orig2.y, deck: orig2.deck },
             mission.hull
           );
-          current[idx2] = clampModuleToHull(
+          const swap2 = clampModuleToHull(
             { ...orig2, x: orig.x, y: orig.y, deck: orig.deck },
             mission.hull
           );
+          current[idx] = swap1;
+          current[idx2] = swap2;
+
+          if (hasAnyCollisionOrOob(mission, current)) {
+            current[idx] = orig;
+            current[idx2] = orig2;
+            temp *= cooling;
+            continue;
+          }
 
           const nextCost = fastEnergy(mission, current);
           const delta = nextCost - currentCost;
@@ -354,7 +374,6 @@ export function autoOptimizeHabitat(
           continue;
         }
       } else {
-        // 90-degree rotation
         const rotated: ZoneModule = clampModuleToHull(
           {
             ...orig,
@@ -364,6 +383,13 @@ export function autoOptimizeHabitat(
           },
           mission.hull
         );
+        const collides = current.some(
+          (other, j) => j !== idx && overlapArea2D(rotated, other) > 0.001
+        );
+        if (collides || !isModuleInHull(rotated, mission.hull)) {
+          temp *= cooling;
+          continue;
+        }
         current[idx] = rotated;
       }
 

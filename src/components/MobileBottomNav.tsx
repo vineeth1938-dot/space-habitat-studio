@@ -22,19 +22,19 @@ export const MobileBottomNav: React.FC = () => {
   }> = [
     {
       id: 'canvas',
-      label: 'Blueprint',
+      label: 'Floorplan',
       icon: <Grid className="w-4 h-4" />,
     },
     {
       id: 'build',
-      label: 'Build',
+      label: 'Modules',
       icon: <Layers className="w-4 h-4" />,
     },
     {
       id: 'audit',
-      label: 'Audit',
+      label: 'Safety',
       icon: <ShieldAlert className="w-4 h-4" />,
-      badge: failCount > 0 ? `${failCount}` : `${evaluation.scores.overall}`,
+      badge: failCount > 0 ? `${failCount}` : 'OK',
       badgeColor: failCount > 0 ? '#ef4444' : '#10b981',
     },
   ];
@@ -57,20 +57,23 @@ export const MobileBottomNav: React.FC = () => {
             key={t.id}
             data-testid={`mobile-tab-${t.id}`}
             onClick={() => setMobilePanel(t.id)}
-            className="min-h-[54px] px-1 flex flex-col items-center justify-center gap-1 border-r relative cursor-pointer"
+            className="min-h-[56px] px-1 flex flex-col items-center justify-center gap-1 border-r relative cursor-pointer"
             style={{
               borderColor: 'var(--border-hairline)',
               backgroundColor: active ? 'var(--bg-subtle)' : 'transparent',
-              color: active ? 'var(--fg-primary)' : 'var(--fg-muted)',
+              color: active ? 'var(--accent-primary)' : 'var(--fg-muted)',
             }}
           >
             <div className="relative flex items-center justify-center">
               {t.icon}
               {t.badge && (
                 <span
-                  className="ml-1 px-1 py-0.2 text-[9px] font-mono-cad font-bold border leading-none"
+                  className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-mono-cad font-bold leading-none"
                   style={{
-                    borderColor: t.badgeColor,
+                    backgroundColor:
+                      t.badgeColor === '#ef4444'
+                        ? 'rgba(239, 68, 68, 0.16)'
+                        : 'rgba(16, 185, 129, 0.16)',
                     color: t.badgeColor,
                   }}
                 >
@@ -78,7 +81,7 @@ export const MobileBottomNav: React.FC = () => {
                 </span>
               )}
             </div>
-            <span className="font-mono-cad text-[10px] font-semibold uppercase tracking-wide">
+            <span className="text-[11px] font-semibold tracking-tight">
               {t.label}
             </span>
           </button>
@@ -89,19 +92,19 @@ export const MobileBottomNav: React.FC = () => {
         type="button"
         data-testid="mobile-tab-compare"
         onClick={() => setCompareOpen(true)}
-        className="min-h-[54px] px-1 flex flex-col items-center justify-center gap-1 cursor-pointer"
+        className="min-h-[56px] px-1 flex flex-col items-center justify-center gap-1 cursor-pointer"
         style={{ color: 'var(--fg-muted)' }}
       >
         <div className="flex items-center">
           <Columns2 className="w-4 h-4" />
           <span
-            className="ml-1 px-1 py-0.2 text-[9px] font-mono-cad border leading-none"
-            style={{ borderColor: 'var(--border-hairline)' }}
+            className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-mono-cad leading-none"
+            style={{ backgroundColor: 'var(--bg-subtle)' }}
           >
             {snapshots.length}
           </span>
         </div>
-        <span className="font-mono-cad text-[10px] font-semibold uppercase tracking-wide">
+        <span className="text-[11px] font-semibold tracking-tight">
           Compare
         </span>
       </button>
