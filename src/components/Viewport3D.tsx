@@ -1,11 +1,32 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { Compass, Eye, Footprints, Layers, Moon, Play, Siren, Sun, Video } from 'lucide-react';
+import {
+  Compass,
+  Eye,
+  Footprints,
+  Layers,
+  Moon,
+  Play,
+  RotateCcw,
+  Siren,
+  Sun,
+  Video,
+} from 'lucide-react';
 import { EvaluationReport, LightingMode, MissionConfig, ZoneNode } from '../types/habitat';
 import { ZONE_CATALOG } from '../data/zoneCatalog';
 import { clampFinite, getHullBounds } from '../engine/hullMath';
 import { useHabitatStore } from '../store/habitatStore';
+
+export interface CrewEyePoseEvent {
+  active: boolean;
+  x: number;
+  y: number;
+  angleDeg: number;
+  deck: number;
+}
+
+const FP_PIVOT_DIST = 0.15;
 
 interface Viewport3DProps {
   missionOverride?: MissionConfig;
@@ -170,7 +191,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           if (forward.lengthSq() < 0.01) forward.set(1, 0, 0);
           const eyeY = camera.position.y;
           camera.position.set(hitPt.x, eyeY, hitPt.z);
-          controls.target.set(hitPt.x + forward.x * 0.8, eyeY, hitPt.z + forward.z * 0.8);
+          controls.target.set(
+            hitPt.x + forward.x * FP_PIVOT_DIST,
+            eyeY,
+            hitPt.z + forward.z * FP_PIVOT_DIST
+          );
           controls.update();
           return;
         }
@@ -219,6 +244,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     resizeObserver.observe(container);
 
     let lastFrameTime = performance.now();
+    let lastPoseEmitTime = 0;
     let rafId = 0;
     const animate = () => {
       rafId = requestAnimationFrame(animate);
@@ -229,8 +255,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       if (cameraPresetRef.current === 'first_person' && pressedKeysRef.current.size > 0) {
         const state = useHabitatStore.getState();
         const { width, depth, wall } = getHullBounds(state.mission.hull);
-        const halfW = Math.max(0.5, width / 2 - wall - 0.25);
-        const halfD = Math.max(0.5, depth / 2 - wall - 0.25);
+        const halfW = Math.max(0.5, width / 2 - wall - 0.35);
+        const halfD = Math.max(0.5, depth / 2 - wall - 0.35);
         const speed = 3.2 * dt;
 
         const forward = new THREE.Vector3()
@@ -252,29 +278,78 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           const nz = clampFinite(camera.position.z + delta.z, -halfD, halfD);
           camera.position.x = nx;
           camera.position.z = nz;
-          controls.target.set(nx + forward.x * 0.8, camera.position.y, nz + forward.z * 0.8);
+          controls.target.set(
+            nx + forward.x * FP_PIVOT_DIST,
+            camera.position.y,
+            nz + forward.z * FP_PIVOT_DIST
+          );
         }
       }
 
       const walk = walkProgressRef.current;
       if (walk.active && walk.pts.length >= 2) {
-        walk.t += dt * 0.35;
+        walk.t += dt * 0.32;
         if (walk.t >= 1) {
           walk.active = false;
           setWalkingEgress(false);
+          // At end of walk, orient gaze back toward habitat centerline so view never faces an endwall
+          const endPt = walk.pts[walk.pts.length - 1];
+          const toCenter = new THREE.Vector3(-endPt.x, 0, -endPt.z * 0.5).normalize();
+          if (toCenter.lengthSq() < 0.01) toCenter.set(-1, 0, 0);
+          camera.position.copy(endPt);
+          controls.target.set(
+            endPt.x + toCenter.x * FP_PIVOT_DIST,
+            endPt.y,
+            endPt.z + toCenter.z * FP_PIVOT_DIST
+          );
         } else {
-          const scaled = walk.t * (walk.pts.length - 1);
-          const idx = Math.min(walk.pts.length - 2, Math.floor(scaled));
+          const maxSeg = walk.pts.length - 1;
+          const scaled = walk.t * maxSeg;
+          const idx = Math.min(maxSeg - 1, Math.floor(scaled));
           const frac = scaled - idx;
           const curPt = new THREE.Vector3().lerpVectors(walk.pts[idx], walk.pts[idx + 1], frac);
-          const lookIdx = Math.min(walk.pts.length - 1, idx + 2);
-          const lookPt = walk.pts[lookIdx];
+          const lookIdx = Math.min(maxSeg, idx + 3);
+          const rawAhead = new THREE.Vector3().subVectors(walk.pts[lookIdx], curPt).setY(0);
+          if (rawAhead.lengthSq() < 0.005) {
+            rawAhead.subVectors(walk.pts[maxSeg], walk.pts[0]).setY(0);
+          }
+          rawAhead.normalize();
+
+          // During final 18% of walk, smoothly turn head inward toward habitat interior overview
+          if (walk.t > 0.82) {
+            const turnBlend = (walk.t - 0.82) / 0.18;
+            const inward = new THREE.Vector3(-curPt.x, 0, -curPt.z * 0.5).normalize();
+            rawAhead.lerp(inward, turnBlend * 0.85).normalize();
+          }
+
           camera.position.copy(curPt);
-          controls.target.lerp(lookPt, 0.25);
+          const desiredTarget = new THREE.Vector3(
+            curPt.x + rawAhead.x * FP_PIVOT_DIST,
+            curPt.y,
+            curPt.z + rawAhead.z * FP_PIVOT_DIST
+          );
+          controls.target.lerp(desiredTarget, 0.35);
         }
       }
 
       controls.update();
+
+      // Emit synchronized 2D Crew Eye pose for live 2D Floorplan radar cone
+      if (!readonly && cameraPresetRef.current === 'first_person' && now - lastPoseEmitTime > 32) {
+        lastPoseEmitTime = now;
+        const st = useHabitatStore.getState();
+        const { width: hw, depth: hd } = getHullBounds(st.mission.hull);
+        const look = new THREE.Vector3().subVectors(controls.target, camera.position);
+        const angleDeg = (Math.atan2(look.z, look.x) * 180) / Math.PI;
+        const detail: CrewEyePoseEvent = {
+          active: true,
+          x: Number((camera.position.x + hw / 2).toFixed(2)),
+          y: Number((camera.position.z + hd / 2).toFixed(2)),
+          angleDeg: Number(angleDeg.toFixed(1)),
+          deck: st.activeDeck,
+        };
+        window.dispatchEvent(new CustomEvent('habitat:creweye', { detail }));
+      }
 
       const t = now * 0.0025;
       for (const line of egressLinesRef.current) {
@@ -364,6 +439,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     setWalkingEgress(false);
     if (cameraPreset !== 'first_person') {
       pressedKeysRef.current.clear();
+      if (!readonly) {
+        const detail: CrewEyePoseEvent = { active: false, x: 0, y: 0, angleDeg: 0, deck: 0 };
+        window.dispatchEvent(new CustomEvent('habitat:creweye', { detail }));
+      }
     }
 
     const { width, depth, wall, deckHeight } = getHullBounds(mission.hull);
@@ -376,12 +455,20 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       const eyeY = getCrewEyeY();
       const startX = -width / 2 + wall + 0.9;
       cam.position.set(startX, eyeY, 0);
-      ctrl.target.set(startX + 1.2, eyeY, 0);
-      ctrl.maxDistance = 6;
+      ctrl.target.set(startX + FP_PIVOT_DIST, eyeY, 0);
+      ctrl.minDistance = 0.08;
+      ctrl.maxDistance = 0.22;
+      ctrl.enableZoom = false;
+      ctrl.enablePan = false;
+      ctrl.rotateSpeed = -0.55;
     } else {
       cam.fov = 45;
       cam.updateProjectionMatrix();
+      ctrl.minDistance = 0.25;
       ctrl.maxDistance = 42;
+      ctrl.enableZoom = true;
+      ctrl.enablePan = true;
+      ctrl.rotateSpeed = 1.0;
       ctrl.target.set(0, totalH * 0.4, 0);
       if (cameraPreset === 'top') {
         cam.position.set(0, span * 1.45, 0.01);
@@ -420,31 +507,47 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store.focusPulseTick]);
 
+  const turnCrewEye180 = () => {
+    const cam = cameraRef.current;
+    const ctrl = controlsRef.current;
+    if (!cam || !ctrl) return;
+    const forward = new THREE.Vector3().subVectors(ctrl.target, cam.position);
+    ctrl.target.set(cam.position.x - forward.x, cam.position.y, cam.position.z - forward.z);
+    ctrl.update();
+  };
+
   const startEgressWalkthrough = () => {
     const cam = cameraRef.current;
     const ctrl = controlsRef.current;
     if (!cam || !ctrl) return;
     setCameraPreset('first_person');
-    const { width: hullW, depth: hullD } = getHullBounds(mission.hull);
+    const { width: hullW, depth: hullD, wall } = getHullBounds(mission.hull);
     const cx = hullW / 2;
     const cz = hullD / 2;
     const eyeY = getCrewEyeY();
 
     const activeDeck = store.activeDeck;
-    const candidate =
-      report.egress.airlockPaths.find(
-        (p) => p.deck === activeDeck && p.reachable && p.points.length >= 3
-      ) ?? report.egress.airlockPaths.find((p) => p.reachable && p.points.length >= 3);
+    const deckPaths = report.egress.airlockPaths
+      .filter((p) => p.deck === activeDeck && p.reachable && p.points.length >= 3)
+      .sort((a, b) => b.distanceM - a.distanceM);
+    const anyPaths = report.egress.airlockPaths
+      .filter((p) => p.reachable && p.points.length >= 3)
+      .sort((a, b) => b.distanceM - a.distanceM);
+
+    const candidate = deckPaths[0] ?? anyPaths[0];
 
     if (candidate && candidate.points.length >= 2) {
-      const vecs = candidate.points.map((pt) => new THREE.Vector3(pt.x - cx, eyeY, pt.y - cz));
+      // Traverse corridor waypoints and stop just outside the Airlock doorway
+      const corridorPts =
+        candidate.points.length > 3 ? candidate.points.slice(0, -1) : candidate.points;
+      const vecs = corridorPts.map((pt) => new THREE.Vector3(pt.x - cx, eyeY, pt.y - cz));
       walkProgressRef.current = { active: true, pts: vecs, t: 0 };
       setWalkingEgress(true);
     } else {
       const vecs = [
-        new THREE.Vector3(-cx + 1.0, eyeY, 0),
+        new THREE.Vector3(-cx + wall + 0.9, eyeY, 0),
         new THREE.Vector3(0, eyeY, 0),
-        new THREE.Vector3(cx - 1.2, eyeY, 0),
+        new THREE.Vector3(cx - wall - 1.4, eyeY, 0),
       ];
       walkProgressRef.current = { active: true, pts: vecs, t: 0 };
       setWalkingEgress(true);
@@ -476,9 +579,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const cz = hullD / 2;
     const totalHeight = hull.decks * deckHeight;
 
-    const isCut = cameraPreset === 'cutaway' || cameraPreset === 'first_person';
+    const isCutawayShell = cameraPreset === 'cutaway';
     const hullOpacity =
-      cameraPreset === 'cutaway' ? 0.07 : cameraPreset === 'first_person' ? 0.12 : 0.16;
+      cameraPreset === 'cutaway' ? 0.08 : cameraPreset === 'first_person' ? 0.14 : 0.16;
     const hullColor =
       lightingMode === 'emergency'
         ? 0xf43f5e
@@ -519,7 +622,17 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       group.add(wire);
     } else {
       const radius = Math.max(hull.diameter / 2, totalHeight / 2 + 0.3);
-      const cylGeo = new THREE.CylinderGeometry(radius, radius, hull.length, 32, 1, isCut);
+      // Never leave endcaps open as black void holes; cutaway slices only the upper-front arc
+      const cylGeo = new THREE.CylinderGeometry(
+        radius,
+        radius,
+        hull.length,
+        32,
+        1,
+        false,
+        isCutawayShell ? Math.PI * 0.35 : 0,
+        isCutawayShell ? Math.PI * 1.45 : Math.PI * 2
+      );
       cylGeo.rotateZ(Math.PI / 2);
       const cylMat = new THREE.MeshPhysicalMaterial({
         color: hullColor,
@@ -541,11 +654,26 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         const ringMat = new THREE.MeshBasicMaterial({
           color: hullColor,
           transparent: true,
-          opacity: 0.3,
+          opacity: 0.32,
         });
         const ring = new THREE.Mesh(ringGeo, ringMat);
         ring.position.set(rx, totalHeight / 2, 0);
         group.add(ring);
+      }
+
+      // Port & Starboard CBM / IDSS Docking Hatch Rings on Endcap Bulkheads
+      for (const endSign of [-1, 1] as const) {
+        const endX = endSign * (hull.length / 2 - 0.02);
+        const hatchGeo = new THREE.TorusGeometry(Math.min(0.95, radius * 0.42), 0.045, 8, 32);
+        hatchGeo.rotateY(Math.PI / 2);
+        const hatchMat = new THREE.MeshBasicMaterial({
+          color: endSign === 1 ? 0x10b981 : 0x38bdf8,
+          transparent: true,
+          opacity: 0.55,
+        });
+        const hatchRing = new THREE.Mesh(hatchGeo, hatchMat);
+        hatchRing.position.set(endX, totalHeight / 2, 0);
+        group.add(hatchRing);
       }
     }
 
@@ -904,17 +1032,28 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       {cameraPreset === 'first_person' && !readonly && (
         <div className="shrink-0 bg-[var(--surface-panel)] border-t border-sky-500/40 px-3 py-1 flex flex-wrap items-center justify-between gap-2 text-[10px] text-[var(--text-secondary)]">
           <span className="font-mono-telemetry">
-            ASTRONAUT EYE ({mission.gravity === '0g' ? '1.18m 0g Float' : '1.70m Standing'}) • WASD
-            or Click Floor to Translate
+            ASTRONAUT EYE ({mission.gravity === '0g' ? '1.18m 0g Float' : '1.70m Standing'}) • Drag
+            to Look • WASD or Click Floor to Move
           </span>
-          <button
-            type="button"
-            onClick={startEgressWalkthrough}
-            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 font-medium cursor-pointer"
-          >
-            <Play className="w-2.5 h-2.5" />
-            {walkingEgress ? 'Walking A* Path…' : 'Walk A* Egress'}
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={turnCrewEye180}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[var(--surface-elevated)] hover:bg-[var(--surface-hover)] border border-[var(--border-subtle)] text-sky-200 font-medium cursor-pointer"
+              title="Turn Astronaut View 180°"
+            >
+              <RotateCcw className="w-2.5 h-2.5" />
+              <span>Turn 180°</span>
+            </button>
+            <button
+              type="button"
+              onClick={startEgressWalkthrough}
+              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 font-medium cursor-pointer"
+            >
+              <Play className="w-2.5 h-2.5" />
+              {walkingEgress ? 'Walking A* Path…' : 'Walk A* Egress'}
+            </button>
+          </div>
         </div>
       )}
     </div>

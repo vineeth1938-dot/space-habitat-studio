@@ -9,6 +9,7 @@ import {
   Layers,
   PlayCircle,
   Redo2,
+  RotateCcw,
   Undo2,
 } from 'lucide-react';
 import { HABITAT_PRESETS } from '../data/presets';
@@ -97,19 +98,30 @@ export const TopBar: React.FC = () => {
 
         <div className="h-5 w-px bg-[var(--border-subtle)] hidden md:block" />
 
-        {/* Preset Selector */}
-        <select
-          aria-label="Habitat Preset"
-          value={activePresetId}
-          onChange={(e) => loadPreset(e.target.value)}
-          className="bg-[var(--surface-elevated)] hover:bg-[var(--surface-hover)] border border-[var(--border-strong)] text-[var(--text-primary)] text-xs rounded-md px-2 py-1 max-w-[170px] sm:max-w-[205px] xl:max-w-[255px] truncate outline-none cursor-pointer transition-colors"
-        >
-          {HABITAT_PRESETS.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
+        {/* Preset Selector + One-Click Reset Preset */}
+        <div className="flex items-center gap-1 min-w-0">
+          <select
+            aria-label="Habitat Preset"
+            value={activePresetId}
+            onChange={(e) => loadPreset(e.target.value)}
+            className="bg-[var(--surface-elevated)] hover:bg-[var(--surface-hover)] border border-[var(--border-strong)] text-[var(--text-primary)] text-xs rounded-md px-2 py-1 max-w-[155px] sm:max-w-[195px] xl:max-w-[245px] truncate outline-none cursor-pointer transition-colors"
+          >
+            {HABITAT_PRESETS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => loadPreset(activePresetId)}
+            title="Reset current preset to its original layout"
+            aria-label="Reset Preset"
+            className="p-1.5 rounded-md bg-[var(--surface-elevated)] hover:bg-[var(--surface-hover)] border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-cyan-200 transition-colors cursor-pointer shrink-0"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* Center View Mode Tabs */}

@@ -332,6 +332,15 @@ export function runAStarMultiSourceTarget(
   };
 }
 
+function clampToZoneDoorPerimeter(px: number, py: number, z: ZoneNode): EgressPoint {
+  const cx = Math.max(z.x, Math.min(z.x + z.width, px));
+  const cy = Math.max(z.y, Math.min(z.y + z.height, py));
+  return {
+    x: Number(cx.toFixed(2)),
+    y: Number(cy.toFixed(2)),
+  };
+}
+
 export function cellsToPoints(
   pathCells: number[],
   cols: number,
@@ -339,12 +348,16 @@ export function cellsToPoints(
   targetZone: ZoneNode
 ): EgressPoint[] {
   if (pathCells.length === 0) return [];
-  const pts: EgressPoint[] = [
-    {
-      x: Number((fromZone.x + fromZone.width / 2).toFixed(2)),
-      y: Number((fromZone.y + fromZone.height / 2).toFixed(2)),
-    },
-  ];
+
+  const firstIdx = pathCells[0];
+  const firstX = (firstIdx % cols + 0.5) * EGRESS_GRID_RES;
+  const firstY = (Math.floor(firstIdx / cols) + 0.5) * EGRESS_GRID_RES;
+
+  const lastIdx = pathCells[pathCells.length - 1];
+  const lastX = (lastIdx % cols + 0.5) * EGRESS_GRID_RES;
+  const lastY = (Math.floor(lastIdx / cols) + 0.5) * EGRESS_GRID_RES;
+
+  const pts: EgressPoint[] = [clampToZoneDoorPerimeter(firstX, firstY, fromZone)];
   for (let i = 0; i < pathCells.length; i++) {
     const idx = pathCells[i];
     const r = Math.floor(idx / cols);
@@ -354,10 +367,7 @@ export function cellsToPoints(
       y: Number(((r + 0.5) * EGRESS_GRID_RES).toFixed(2)),
     });
   }
-  pts.push({
-    x: Number((targetZone.x + targetZone.width / 2).toFixed(2)),
-    y: Number((targetZone.y + targetZone.height / 2).toFixed(2)),
-  });
+  pts.push(clampToZoneDoorPerimeter(lastX, lastY, targetZone));
   return pts;
 }
 

@@ -22,10 +22,12 @@ export const EngineeringInspector: React.FC<EngineeringInspectorProps> = ({
   isMobileDrawer = false,
 }) => {
   const {
+    activePresetId,
     mission,
     zones,
     report,
     lastOptimization,
+    loadPreset,
     highlightZones,
     runAutoOptimize,
     revertOptimization,
@@ -194,7 +196,9 @@ export const EngineeringInspector: React.FC<EngineeringInspectorProps> = ({
           >
             <div className="flex items-center justify-between">
               <span className="font-semibold text-emerald-200 text-[11px]">
-                Optimized in {lastOptimization.elapsedMs}ms ({lastOptimization.iterations} steps)
+                {lastOptimization.beforeScore === 100 && lastOptimization.afterScore === 100
+                  ? `Already Optimal (${lastOptimization.elapsedMs}ms check)`
+                  : `Optimized in ${lastOptimization.elapsedMs}ms (${lastOptimization.iterations} steps)`}
               </span>
               <button
                 type="button"
@@ -220,14 +224,26 @@ export const EngineeringInspector: React.FC<EngineeringInspectorProps> = ({
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={revertOptimization}
-              className="inline-flex items-center gap-1 text-[11px] text-cyan-300 hover:text-cyan-200 font-medium cursor-pointer"
-            >
-              <RotateCcw className="w-3 h-3" />
-              <span>Undo / Revert Layout</span>
-            </button>
+            <div className="flex items-center justify-between gap-2 pt-0.5">
+              <button
+                type="button"
+                onClick={revertOptimization}
+                className="inline-flex items-center gap-1 text-[11px] text-cyan-300 hover:text-cyan-200 font-medium cursor-pointer"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Undo / Revert Layout</span>
+              </button>
+
+              {lastOptimization.beforeScore === lastOptimization.afterScore && (
+                <button
+                  type="button"
+                  onClick={() => loadPreset(activePresetId)}
+                  className="inline-flex items-center gap-1 text-[11px] text-amber-300 hover:text-amber-200 font-medium cursor-pointer"
+                >
+                  <span>Reset Preset</span>
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>

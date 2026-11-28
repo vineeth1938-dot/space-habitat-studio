@@ -16,6 +16,40 @@ import { EvaluationReport, MissionConfig, ZoneNode, ZoneType } from '../types/ha
 import { ZONE_CATALOG } from '../data/zoneCatalog';
 import { getHullBounds, getHullCornerRadius, snapToGrid } from '../engine/hullMath';
 import { useHabitatStore } from '../store/habitatStore';
+import type { CrewEyePoseEvent } from './Viewport3D';
+
+function formatCadModuleLabel(z: ZoneNode, wPx: number, shortLabel: string): string {
+  if (wPx < 66) return shortLabel;
+  const raw = z.label.replace(/\s*\(\d+\s*Bunks?\)/i, '').trim();
+
+  if (wPx >= 136 && raw.length <= 22) return raw;
+
+  switch (z.type) {
+    case 'crew_quarters': {
+      const match = raw.match(/Crew Quarters\s*([A-Z0-9#]+)?/i);
+      const suffix = match?.[1] ? ` ${match[1]}` : '';
+      return wPx < 96 ? `Sleep${suffix}` : `Crew Quarters${suffix}`;
+    }
+    case 'hygiene':
+      return wPx < 92 ? 'Hygiene' : 'Hygiene (UWMS)';
+    case 'storm_shelter':
+      return wPx < 96 ? 'Shelter' : 'Storm Shelter';
+    case 'airlock':
+      return wPx < 92 ? 'Airlock' : 'Airlock Hatch';
+    case 'eclss':
+      return wPx < 92 ? 'ECLSS' : 'ECLSS & Water';
+    case 'medical':
+      return wPx < 96 ? 'Med Lab' : 'Medical & Lab';
+    case 'stowage':
+      return wPx < 92 ? 'Stowage' : 'Stowage & H₂O';
+    case 'galley':
+      return wPx < 105 ? 'Galley / Mess' : 'Galley & Wardroom';
+    case 'exercise':
+      return wPx < 100 ? 'Exercise' : 'Exercise & ARED';
+    default:
+      return raw.length > 16 ? shortLabel : raw;
+  }
+}
 
 interface Floorplan2DProps {
   missionOverride?: MissionConfig;
@@ -82,6 +116,21 @@ export const Floorplan2D: React.FC<Floorplan2DProps> = ({
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [interaction, setInteraction] = useState<InteractionState>(null);
+  const [crewEyePose, setCrewEyePose] = useState<CrewEyePoseEvent | null>(null);
+
+  useEffect(() => {
+    if (readonly || compact) return;
+    const onCrewEye = (e: Event) => {
+      const detail = (e as CustomEvent<CrewEyePoseEvent>).detail;
+      if (!detail || !detail.active) {
+        setCrewEyePose(null);
+      } else {
+        setCrewEyePose(detail);
+      }
+    };
+    window.addEventListener('habitat:creweye', onCrewEye);
+    return () => window.removeEventListener('habitat:creweye', onCrewEye);
+  }, [readonly, compact]);
 
   const zoomRef = useRef(zoom);
   const panRef = useRef(pan);
@@ -627,165 +676,84 @@ export const Floorplan2D: React.FC<Floorplan2DProps> = ({
             </text>
           )}
 
-          {/* Hazard Halos (Acoustic + Contamination + 0g Orientation Conflict) */}
+          {/* Background Acoustic Hazard Aura Circles (Underneath module cards) */}
           {(store.showHazardOverlay || readonly) && (
             <g pointerEvents="none">
               {report.acousticPairs
                 .filter((p) => p.violates)
                 .map((p) => {
                   const src = deckZones.find((z) => z.id === p.sourceId);
-                  const tgt = deckZones.find((z) => z.id === p.targetId);
-                  if (!src || !tgt) return null;
+                  if (!src) return null;
                   const sx = toPx(src.x + src.width / 2);
                   const sy = toPx(src.y + src.height / 2);
-                  const tx = toPx(tgt.x + tgt.width / 2);
-                  const ty = toPx(tgt.y + tgt.height / 2);
                   return (
-                    <g key={`ac-${p.sourceId}-${p.targetId}`}>
-                      <circle
-                        cx={sx}
-                        cy={sy}
-                        r={2.2 * PX_PER_M}
-                        fill="#f43f5e"
-                        fillOpacity="0.07"
-                        stroke="#f43f5e"
-                        strokeWidth="1.1"
-                        strokeDasharray="4 4"
-                        strokeOpacity="0.4"
-                      />
-                      <line
-                        x1={sx}
-                        y1={sy}
-                        x2={tx}
-                        y2={ty}
-                        stroke="#fb7185"
-                        strokeWidth="2"
-                        strokeDasharray="5 3"
-                      />
-                      {!compact && (
-                        <>
-                          <rect
-                            x={(sx + tx) / 2 - 28}
-                            y={(sy + ty) / 2 - 21}
-                            width="56"
-                            height="16"
-                            rx="4"
-                            fill="#881337"
-                            stroke="#fb7185"
-                            strokeWidth="1"
-                          />
-                          <text
-                            x={(sx + tx) / 2}
-                            y={(sy + ty) / 2 - 10}
-                            textAnchor="middle"
-                            fill="#ffe4e6"
-                            fontSize="9"
-                            className="font-mono-telemetry font-bold"
-                          >
-                            {p.receivedDba} dBA
-                          </text>
-                        </>
-                      )}
-                    </g>
-                  );
-                })}
-
-              {report.contaminationPairs
-                .filter((p) => p.violates)
-                .map((p) => {
-                  const hyg = deckZones.find((z) => z.id === p.hygieneId);
-                  const tgt = deckZones.find((z) => z.id === p.targetId);
-                  if (!hyg || !tgt) return null;
-                  const hx = toPx(hyg.x + hyg.width / 2);
-                  const hy = toPx(hyg.y + hyg.height / 2);
-                  const tx = toPx(tgt.x + tgt.width / 2);
-                  const ty = toPx(tgt.y + tgt.height / 2);
-                  return (
-                    <g key={`ct-${p.hygieneId}-${p.targetId}`}>
-                      <line
-                        x1={hx}
-                        y1={hy}
-                        x2={tx}
-                        y2={ty}
-                        stroke="#fbbf24"
-                        strokeWidth="2"
-                        strokeDasharray="4 3"
-                      />
-                      {!compact && (
-                        <>
-                          <rect
-                            x={(hx + tx) / 2 - 26}
-                            y={(hy + ty) / 2 - 9}
-                            width="52"
-                            height="17"
-                            rx="4"
-                            fill="#78350f"
-                            stroke="#fbbf24"
-                            strokeWidth="1"
-                          />
-                          <text
-                            x={(hx + tx) / 2}
-                            y={(hy + ty) / 2 + 3}
-                            textAnchor="middle"
-                            fill="#fef3c7"
-                            fontSize="9.5"
-                            className="font-mono-telemetry font-bold"
-                          >
-                            {p.distanceM.toFixed(1)}m!
-                          </text>
-                        </>
-                      )}
-                    </g>
-                  );
-                })}
-
-              {!compact &&
-                (report.orientationConflicts ?? []).map((oc, idx) => {
-                  const za = deckZones.find((z) => z.id === oc.zoneAId);
-                  const zb = deckZones.find((z) => z.id === oc.zoneBId);
-                  if (!za || !zb) return null;
-                  const ax = toPx(za.x + za.width / 2);
-                  const ay = toPx(za.y + za.height / 2);
-                  const bx = toPx(zb.x + zb.width / 2);
-                  const by = toPx(zb.y + zb.height / 2);
-                  return (
-                    <g key={`oc-${idx}`}>
-                      <line
-                        x1={ax}
-                        y1={ay}
-                        x2={bx}
-                        y2={by}
-                        stroke="#c084fc"
-                        strokeWidth="1.75"
-                        strokeDasharray="3 3"
-                      />
-                      <rect
-                        x={(ax + bx) / 2 - 26}
-                        y={(ay + by) / 2 + 7}
-                        width="52"
-                        height="15"
-                        rx="3"
-                        fill="#3b0764"
-                        stroke="#c084fc"
-                        strokeWidth="1"
-                      />
-                      <text
-                        x={(ax + bx) / 2}
-                        y={(ay + by) / 2 + 17.5}
-                        textAnchor="middle"
-                        fill="#f3e8ff"
-                        fontSize="8.5"
-                        className="font-mono-telemetry font-bold"
-                      >
-                        Δ{oc.deltaDeg}° 0g
-                      </text>
-                    </g>
+                    <circle
+                      key={`ac-aura-${p.sourceId}-${p.targetId}`}
+                      cx={sx}
+                      cy={sy}
+                      r={2.2 * PX_PER_M}
+                      fill="#f43f5e"
+                      fillOpacity="0.06"
+                      stroke="#f43f5e"
+                      strokeWidth="1.1"
+                      strokeDasharray="4 4"
+                      strokeOpacity="0.38"
+                    />
                   );
                 })}
             </g>
           )}
 
-          {/* Placed Habitat Zones */}
+          {/* Corridor Layer: ISS IMV Ventilation / CO2 Airflow Overlay (Underneath module cards) */}
+          {store.showAirflowOverlay && !readonly && (
+            <g pointerEvents="none">
+              {deckAirflowLinks.map((af) => (
+                <polyline
+                  key={`af-${af.fromEclssId}-${af.toZoneId}`}
+                  points={af.points.map((pt) => `${toPx(pt.x)},${toPx(pt.y)}`).join(' ')}
+                  fill="none"
+                  stroke={af.stagnantRisk ? '#f43f5e' : '#22d3ee'}
+                  strokeWidth={af.stagnantRisk ? '2.4' : '1.9'}
+                  strokeOpacity="0.82"
+                  strokeDasharray="5 5"
+                  className="animate-egress-flow"
+                />
+              ))}
+            </g>
+          )}
+
+          {/* Corridor Layer: A* Emergency Egress Paths Overlay (Underneath module cards) */}
+          {(store.showEgressOverlay || readonly) && (
+            <g pointerEvents="none">
+              {deckShelterPaths.map((p) => (
+                <polyline
+                  key={`sh-${p.fromZoneId}`}
+                  points={p.points.map((pt) => `${toPx(pt.x)},${toPx(pt.y)}`).join(' ')}
+                  fill="none"
+                  stroke="#38bdf8"
+                  strokeWidth="2.1"
+                  strokeOpacity="0.68"
+                  strokeDasharray="6 6"
+                  className="animate-egress-flow"
+                />
+              ))}
+
+              {deckAirlockPaths.map((p) => (
+                <polyline
+                  key={`al-${p.fromZoneId}`}
+                  points={p.points.map((pt) => `${toPx(pt.x)},${toPx(pt.y)}`).join(' ')}
+                  fill="none"
+                  stroke="#10b981"
+                  strokeWidth="2.6"
+                  strokeOpacity="0.92"
+                  strokeDasharray="8 6"
+                  className="animate-egress-flow"
+                />
+              ))}
+            </g>
+          )}
+
+          {/* Placed Habitat Zones (Opaque base fill prevents corridor lines from crossing text) */}
           {deckZones.map((z) => {
             const cat = ZONE_CATALOG[z.type] ?? ZONE_CATALOG.stowage;
             const isSelected = !readonly && store.selectedZoneId === z.id;
@@ -811,16 +779,7 @@ export const Floorplan2D: React.FC<Floorplan2DProps> = ({
                     ? '#f59e0b'
                     : cat.accentColor;
 
-            const displayLabel =
-              wPx < 84
-                ? cat.shortLabel
-                : wPx < 126
-                  ? z.label.length > 13
-                    ? `${z.label.slice(0, 12)}…`
-                    : z.label
-                  : z.label.length > 20
-                    ? `${z.label.slice(0, 19)}…`
-                    : z.label;
+            const displayLabel = formatCadModuleLabel(z, wPx, cat.shortLabel);
 
             return (
               <g
@@ -845,6 +804,17 @@ export const Floorplan2D: React.FC<Floorplan2DProps> = ({
                   />
                 )}
 
+                {/* Solid dark module substrate so corridor lines never bleed through text */}
+                <rect
+                  x={xPx}
+                  y={yPx}
+                  width={wPx}
+                  height={hPx}
+                  rx="4"
+                  fill="#0b1220"
+                  fillOpacity="0.93"
+                />
+
                 <rect
                   x={xPx}
                   y={yPx}
@@ -852,7 +822,7 @@ export const Floorplan2D: React.FC<Floorplan2DProps> = ({
                   height={hPx}
                   rx="4"
                   fill={cat.color}
-                  fillOpacity={isSelected ? 0.36 : 0.24}
+                  fillOpacity={isSelected ? 0.36 : 0.25}
                   stroke={strokeColor}
                   strokeWidth={isSelected || isHighlighted ? 2.8 : sev ? 2.2 : 1.5}
                 />
@@ -910,7 +880,7 @@ export const Floorplan2D: React.FC<Floorplan2DProps> = ({
                     y={hPx >= 64 ? yPx + hPx / 2 - 3 : yPx + hPx / 2 + 4}
                     textAnchor="middle"
                     fill="#f8fafc"
-                    fontSize={wPx < 90 ? '9.5' : '11'}
+                    fontSize={wPx < 98 ? '9.5' : '10.5'}
                     fontWeight="700"
                   >
                     {displayLabel}
@@ -982,54 +952,177 @@ export const Floorplan2D: React.FC<Floorplan2DProps> = ({
             );
           })}
 
-          {/* ISS IMV Ventilation / CO2 Airflow Overlay */}
-          {store.showAirflowOverlay && !readonly && (
+          {/* Top Annotation Layer: Hazard Callout Connectors & Badges (Never clipped behind module cards) */}
+          {(store.showHazardOverlay || readonly) && (
             <g pointerEvents="none">
-              {deckAirflowLinks.map((af) => (
-                <polyline
-                  key={`af-${af.fromEclssId}-${af.toZoneId}`}
-                  points={af.points.map((pt) => `${toPx(pt.x)},${toPx(pt.y)}`).join(' ')}
-                  fill="none"
-                  stroke={af.stagnantRisk ? '#f43f5e' : '#22d3ee'}
-                  strokeWidth={af.stagnantRisk ? '2.4' : '1.9'}
-                  strokeOpacity="0.82"
-                  strokeDasharray="5 5"
-                  className="animate-egress-flow"
-                />
-              ))}
+              {report.acousticPairs
+                .filter((p) => p.violates)
+                .map((p) => {
+                  const src = deckZones.find((z) => z.id === p.sourceId);
+                  const tgt = deckZones.find((z) => z.id === p.targetId);
+                  if (!src || !tgt) return null;
+                  const sx = toPx(src.x + src.width / 2);
+                  const sy = toPx(src.y + src.height / 2);
+                  const tx = toPx(tgt.x + tgt.width / 2);
+                  const ty = toPx(tgt.y + tgt.height / 2);
+                  const mx = (sx + tx) / 2;
+                  const my = (sy + ty) / 2;
+                  const badgeY = Math.abs(sy - ty) < 28 ? my - 27 : my - 8;
+                  return (
+                    <g key={`ac-fg-${p.sourceId}-${p.targetId}`}>
+                      <line
+                        x1={sx}
+                        y1={sy}
+                        x2={tx}
+                        y2={ty}
+                        stroke="#fb7185"
+                        strokeWidth="1.8"
+                        strokeDasharray="5 3"
+                        strokeOpacity="0.7"
+                      />
+                      {!compact && (
+                        <>
+                          <rect
+                            x={mx - 27}
+                            y={badgeY}
+                            width="54"
+                            height="16"
+                            rx="4"
+                            fill="#881337"
+                            stroke="#fb7185"
+                            strokeWidth="1"
+                          />
+                          <text
+                            x={mx}
+                            y={badgeY + 11}
+                            textAnchor="middle"
+                            fill="#ffe4e6"
+                            fontSize="8.5"
+                            className="font-mono-telemetry font-bold"
+                          >
+                            {p.receivedDba} dBA
+                          </text>
+                        </>
+                      )}
+                    </g>
+                  );
+                })}
+
+              {report.contaminationPairs
+                .filter((p) => p.violates)
+                .map((p) => {
+                  const hyg = deckZones.find((z) => z.id === p.hygieneId);
+                  const tgt = deckZones.find((z) => z.id === p.targetId);
+                  if (!hyg || !tgt) return null;
+                  const hx = toPx(hyg.x + hyg.width / 2);
+                  const hy = toPx(hyg.y + hyg.height / 2);
+                  const tx = toPx(tgt.x + tgt.width / 2);
+                  const ty = toPx(tgt.y + tgt.height / 2);
+                  const mx = (hx + tx) / 2;
+                  const my = (hy + ty) / 2;
+                  const badgeY = Math.abs(hy - ty) < 28 ? my + 17 : my - 8;
+                  return (
+                    <g key={`ct-fg-${p.hygieneId}-${p.targetId}`}>
+                      <line
+                        x1={hx}
+                        y1={hy}
+                        x2={tx}
+                        y2={ty}
+                        stroke="#fbbf24"
+                        strokeWidth="1.8"
+                        strokeDasharray="4 3"
+                        strokeOpacity="0.7"
+                      />
+                      {!compact && (
+                        <>
+                          <rect
+                            x={mx - 25}
+                            y={badgeY}
+                            width="50"
+                            height="16"
+                            rx="4"
+                            fill="#78350f"
+                            stroke="#fbbf24"
+                            strokeWidth="1"
+                          />
+                          <text
+                            x={mx}
+                            y={badgeY + 11}
+                            textAnchor="middle"
+                            fill="#fef3c7"
+                            fontSize="8.5"
+                            className="font-mono-telemetry font-bold"
+                          >
+                            {p.distanceM.toFixed(1)}m!
+                          </text>
+                        </>
+                      )}
+                    </g>
+                  );
+                })}
+
+              {!compact &&
+                mission.gravity === '0g' &&
+                deckZones
+                  .filter((z) => z.rotation !== 0 && ZONE_CATALOG[z.type]?.isOccupied)
+                  .map((z) => {
+                    const zx = toPx(z.x) + 6;
+                    const zy = toPx(z.y) + 8;
+                    return (
+                      <g key={`oc-badge-${z.id}`} transform={`translate(${zx}, ${zy})`}>
+                        <rect
+                          width="46"
+                          height="13"
+                          rx="3"
+                          fill="#3b0764"
+                          stroke="#c084fc"
+                          strokeWidth="0.9"
+                        />
+                        <text
+                          x="23"
+                          y="9.5"
+                          textAnchor="middle"
+                          fill="#f3e8ff"
+                          fontSize="8"
+                          className="font-mono-telemetry font-bold"
+                        >
+                          Δ{z.rotation}° 0g
+                        </text>
+                      </g>
+                    );
+                  })}
             </g>
           )}
 
-          {/* A* Emergency Egress Paths Overlay */}
+          {/* Perimeter Hatch Nodes & Bottleneck Pinch-Points (On top of module borders) */}
           {(store.showEgressOverlay || readonly) && (
             <g pointerEvents="none">
-              {deckShelterPaths.map((p) => (
-                <polyline
-                  key={`sh-${p.fromZoneId}`}
-                  points={p.points.map((pt) => `${toPx(pt.x)},${toPx(pt.y)}`).join(' ')}
-                  fill="none"
-                  stroke="#38bdf8"
-                  strokeWidth="2.1"
-                  strokeOpacity="0.65"
-                  strokeDasharray="6 6"
-                  className="animate-egress-flow"
-                />
-              ))}
+              {!compact &&
+                deckAirlockPaths.map((p) => {
+                  const startPt = p.points[0];
+                  const endPt = p.points[p.points.length - 1];
+                  return (
+                    <g key={`door-${p.fromZoneId}`}>
+                      <circle
+                        cx={toPx(startPt.x)}
+                        cy={toPx(startPt.y)}
+                        r="3"
+                        fill="#10b981"
+                        stroke="#064e3b"
+                        strokeWidth="1"
+                      />
+                      <circle
+                        cx={toPx(endPt.x)}
+                        cy={toPx(endPt.y)}
+                        r="3.5"
+                        fill="#34d399"
+                        stroke="#064e3b"
+                        strokeWidth="1"
+                      />
+                    </g>
+                  );
+                })}
 
-              {deckAirlockPaths.map((p) => (
-                <polyline
-                  key={`al-${p.fromZoneId}`}
-                  points={p.points.map((pt) => `${toPx(pt.x)},${toPx(pt.y)}`).join(' ')}
-                  fill="none"
-                  stroke="#10b981"
-                  strokeWidth="2.8"
-                  strokeOpacity="0.9"
-                  strokeDasharray="8 6"
-                  className="animate-egress-flow"
-                />
-              ))}
-
-              {/* Bottleneck Pinch-Points */}
               {!compact &&
                 deckBottlenecks.map((b, i) => (
                   <g key={`bn-${i}`} transform={`translate(${toPx(b.x)}, ${toPx(b.y)})`}>
@@ -1044,6 +1137,25 @@ export const Floorplan2D: React.FC<Floorplan2DProps> = ({
                     </text>
                   </g>
                 ))}
+            </g>
+          )}
+
+          {/* Live Synchronized 2D Astronaut Crew-Eye Position & 64° FOV Radar Cone */}
+          {crewEyePose && crewEyePose.active && crewEyePose.deck === activeDeck && !compact && (
+            <g
+              pointerEvents="none"
+              transform={`translate(${toPx(crewEyePose.x)}, ${toPx(crewEyePose.y)}) rotate(${crewEyePose.angleDeg})`}
+            >
+              <polygon
+                points="0,0 58,-34 58,34"
+                fill="#38bdf8"
+                fillOpacity="0.22"
+                stroke="#38bdf8"
+                strokeWidth="1"
+                strokeOpacity="0.55"
+              />
+              <circle r="6" fill="#0284c7" stroke="#e0f2fe" strokeWidth="1.8" />
+              <circle cx="3" cy="0" r="1.8" fill="#ffffff" />
             </g>
           )}
         </svg>

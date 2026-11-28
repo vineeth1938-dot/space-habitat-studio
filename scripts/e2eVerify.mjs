@@ -262,6 +262,24 @@ async function main() {
     }
     await cdp.screenshot('03-optimized-1440x900.png');
 
+    // 4b. Test Crew Eye + Walk A* Egress to completion on the optimized layout
+    await cdp.eval(`(() => {
+      const btns = Array.from(document.querySelectorAll('button'));
+      btns.find(b => b.textContent?.includes('Crew Eye'))?.click();
+    })()`);
+    await sleep(150);
+    await cdp.eval(`(() => {
+      const btns = Array.from(document.querySelectorAll('button'));
+      btns.find(b => b.textContent?.includes('Walk A* Egress'))?.click();
+    })()`);
+    await sleep(3400);
+    await cdp.screenshot('03b-walk-egress-complete-1440x900.png');
+    await cdp.eval(`(() => {
+      const btns = Array.from(document.querySelectorAll('button'));
+      btns.find(b => b.textContent?.includes('Orbit'))?.click();
+    })()`);
+    await sleep(150);
+
     // 5. Solar-Flare Stress Test (X10 Extreme SPE)
     const stormCheck = await cdp.eval(`(async () => {
       const navBtns = Array.from(document.querySelectorAll('nav button'));
