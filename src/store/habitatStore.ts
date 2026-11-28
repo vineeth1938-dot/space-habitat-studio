@@ -21,7 +21,9 @@ import {
   getHullBounds,
   getRectOverlapArea,
   isRectInsideHull,
+  resolveDeckAndHullCollisions,
   sanitizeMissionConfig,
+  sanitizeZoneNode,
   snapToGrid,
 } from '../engine/hullMath';
 import {
@@ -91,6 +93,8 @@ export interface HabitatState {
     recordHistory?: boolean
   ) => void;
   rotateZone: (id: string) => void;
+  toggleZoneLock: (id: string) => void;
+  duplicateZone: (id: string) => void;
   deleteZone: (id: string) => void;
   clearAllZones: () => void;
   selectZone: (id: string | null) => void;
@@ -173,7 +177,10 @@ function loadPersistedSnapshots(): LayoutSnapshot[] {
         continue;
       }
       const m = sanitizeMissionConfig(item.mission);
-      const zs = (item.zones as ZoneNode[]).map((z) => clampZoneToHull(z, m.hull));
+      const zs = (item.zones as unknown[])
+        .map((z, idx) => sanitizeZoneNode(z, m.hull, idx))
+        .filter((z): z is ZoneNode => z !== null);
+      if (zs.length === 0 && item.zones.length > 0) continue;
       const rep = evaluateHabitat(m, zs);
       rebuilt.push({
         id: item.id,
@@ -343,7 +350,16 @@ export const useHabitatStore = create<HabitatState>((set, get) => ({
       nextHullRaw.length = Math.max(12.0, nextHullRaw.diameter * 1.8);
     }
     const mission = sanitizeMissionConfig({ ...state.mission, hull: nextHullRaw });
-    const nextZones = state.zones.map((z) => clampZoneToHull(z, mission.hull));
+    const clampedZones = state.zones.map((z) => clampZoneToHull(z, mission.hull));
+    const decksReduced = mission.hull.decks < state.mission.hull.decks;
+    const shrankBounds =
+      mission.hull.diameter < state.mission.hull.diameter ||
+      mission.hull.length < state.mission.hull.length ||
+      mission.hull.type !== state.mission.hull.type;
+    const nextZones =
+      decksReduced || shrankBounds
+        ? resolveDeckAndHullCollisions(mission, clampedZones)
+        : clampedZones;
     const activeDeck = Math.min(state.activeDeck, mission.hull.decks - 1);
     const { report, stormStress } = recompute(mission, nextZones, state.weather);
     set({
@@ -415,6 +431,8 @@ export const useHabitatStore = create<HabitatState>((set, get) => ({
 
   moveZone: (id, x, y, recordHistory = false) => {
     const state = get();
+    const target = state.zones.find((z) => z.id === id);
+    if (!target || target.locked) return;
     const sx = snapToGrid(x);
     const sy = snapToGrid(y);
     const zones = state.zones.map((z) =>
@@ -431,9 +449,11 @@ export const useHabitatStore = create<HabitatState>((set, get) => ({
 
   resizeZone: (id, width, height, x, y, recordHistory = false) => {
     const state = get();
+    const target = state.zones.find((z) => z.id === id);
+    if (!target || target.locked) return;
     const zones = state.zones.map((z) => {
       if (z.id !== id) return z;
-      const cat = ZONE_CATALOG[z.type];
+      const cat = ZONE_CATALOG[z.type] ?? ZONE_CATALOG.stowage;
       const nw = Math.max(cat.minWidth, snapToGrid(width));
       const nh = Math.max(cat.minHeight, snapToGrid(height));
       return clampZoneToHull(
@@ -458,6 +478,8 @@ export const useHabitatStore = create<HabitatState>((set, get) => ({
 
   rotateZone: (id) => {
     const state = get();
+    const target = state.zones.find((z) => z.id === id);
+    if (!target || target.locked) return;
     const zones = state.zones.map((z) => {
       if (z.id !== id) return z;
       const rotated: ZoneNode = {
@@ -478,8 +500,52 @@ export const useHabitatStore = create<HabitatState>((set, get) => ({
     });
   },
 
+  toggleZoneLock: (id) => {
+    const state = get();
+    const zones = state.zones.map((z) => (z.id === id ? { ...z, locked: !z.locked } : z));
+    set({
+      zones,
+      past: pushHistory(state),
+      future: [],
+    });
+  },
+
+  duplicateZone: (id) => {
+    const state = get();
+    const src = state.zones.find((z) => z.id === id);
+    if (!src) return;
+    const pos = findOpenPlacement(state.mission, state.zones, src.deck, src.width, src.height);
+    const sameTypeCount = state.zones.filter((z) => z.type === src.type).length + 1;
+    const baseCat = ZONE_CATALOG[src.type] ?? ZONE_CATALOG.stowage;
+    const clone: ZoneNode = clampZoneToHull(
+      {
+        ...src,
+        id: `${src.type}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`,
+        label: `${baseCat.label} #${sameTypeCount}`,
+        x: pos.x,
+        y: pos.y,
+        locked: false,
+      },
+      state.mission.hull
+    );
+    const zones = [...state.zones, clone];
+    const { report, stormStress } = recompute(state.mission, zones, state.weather);
+    set({
+      zones,
+      report,
+      stormStress,
+      selectedZoneId: clone.id,
+      highlightedZoneIds: [clone.id],
+      activeDeck: clone.deck,
+      past: pushHistory(state),
+      future: [],
+    });
+  },
+
   deleteZone: (id) => {
     const state = get();
+    const target = state.zones.find((z) => z.id === id);
+    if (!target || target.locked) return;
     const zones = state.zones.filter((z) => z.id !== id);
     const { report, stormStress } = recompute(state.mission, zones, state.weather);
     set({
@@ -590,11 +656,15 @@ export const useHabitatStore = create<HabitatState>((set, get) => ({
       mission: structuredClone(state.mission),
       zones: structuredClone(state.zones),
     };
+    const validIds = new Set(prev.zones.map((z) => z.id));
     const { report, stormStress } = recompute(prev.mission, prev.zones, state.weather);
     set({
       mission: prev.mission,
       zones: prev.zones,
       activeDeck: Math.min(state.activeDeck, prev.mission.hull.decks - 1),
+      selectedZoneId:
+        state.selectedZoneId && validIds.has(state.selectedZoneId) ? state.selectedZoneId : null,
+      highlightedZoneIds: state.highlightedZoneIds.filter((id) => validIds.has(id)),
       report,
       stormStress,
       past: state.past.slice(0, -1),
@@ -611,11 +681,15 @@ export const useHabitatStore = create<HabitatState>((set, get) => ({
       mission: structuredClone(state.mission),
       zones: structuredClone(state.zones),
     };
+    const validIds = new Set(next.zones.map((z) => z.id));
     const { report, stormStress } = recompute(next.mission, next.zones, state.weather);
     set({
       mission: next.mission,
       zones: next.zones,
       activeDeck: Math.min(state.activeDeck, next.mission.hull.decks - 1),
+      selectedZoneId:
+        state.selectedZoneId && validIds.has(state.selectedZoneId) ? state.selectedZoneId : null,
+      highlightedZoneIds: state.highlightedZoneIds.filter((id) => validIds.has(id)),
       report,
       stormStress,
       past: [...state.past, currentEntry],
@@ -665,9 +739,13 @@ export const useHabitatStore = create<HabitatState>((set, get) => ({
     const state = get();
     if (!state.lastOptimization) return;
     const restored = structuredClone(state.lastOptimization.previousZones);
+    const validIds = new Set(restored.map((z) => z.id));
     const { report, stormStress } = recompute(state.mission, restored, state.weather);
     set({
       zones: restored,
+      selectedZoneId:
+        state.selectedZoneId && validIds.has(state.selectedZoneId) ? state.selectedZoneId : null,
+      highlightedZoneIds: state.highlightedZoneIds.filter((id) => validIds.has(id)),
       report,
       stormStress,
       lastOptimization: null,

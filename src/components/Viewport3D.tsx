@@ -62,12 +62,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const { deckHeight } = getHullBounds(mission.hull);
     const activeDeck = readonly ? 0 : store.activeDeck;
     const base = activeDeck * deckHeight;
-    // 1.70m standing astronaut eye height in partial gravity; 1.18m centerline neutral float in 0g
     const localEye = mission.gravity === '0g' ? 1.18 : 1.7;
     return base + Math.min(localEye, deckHeight - 0.25);
   };
 
-  // Initialize Three.js renderer once & guarantee zero WebGL context leaks
+  // Initialize Three.js renderer once & guarantee zero WebGL/event leaks on unmount
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -86,7 +85,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(container.clientWidth || 400, container.clientHeight || 300);
-    renderer.setClearColor(0x090d16, 1);
+    renderer.setClearColor(0x080c14, 1);
     renderer.domElement.style.touchAction = readonly ? 'pan-y' : 'none';
     container.appendChild(renderer.domElement);
 
@@ -143,7 +142,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     scene.add(dynamicGroup);
     dynamicGroupRef.current = dynamicGroup;
 
-    // Click raycasting: select module OR click-to-walk on deck floor in First-Person mode
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
     let pointerDownPos = { x: 0, y: 0 };
@@ -188,7 +186,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     renderer.domElement.addEventListener('pointerdown', onPointerDown);
     renderer.domElement.addEventListener('pointerup', onPointerUp);
 
-    // WASD / Arrow navigation when in First-Person Crew View
     const onKeyDown = (e: KeyboardEvent) => {
       if (cameraPresetRef.current !== 'first_person' || readonly) return;
       const tag = (e.target as HTMLElement | null)?.tagName;
@@ -201,8 +198,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const onKeyUp = (e: KeyboardEvent) => {
       pressedKeysRef.current.delete(e.key.toLowerCase());
     };
+    const onWindowBlur = () => {
+      pressedKeysRef.current.clear();
+    };
+
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onWindowBlur);
 
     const resizeObserver = new ResizeObserver(() => {
       if (!container) return;
@@ -224,7 +226,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       const dt = Math.min(0.05, (now - lastFrameTime) / 1000);
       lastFrameTime = now;
 
-      // First-Person WASD movement
       if (cameraPresetRef.current === 'first_person' && pressedKeysRef.current.size > 0) {
         const state = useHabitatStore.getState();
         const { width, depth, wall } = getHullBounds(state.mission.hull);
@@ -255,7 +256,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         }
       }
 
-      // Automated A* Corridor Walkthrough interpolation
       const walk = walkProgressRef.current;
       if (walk.active && walk.pts.length >= 2) {
         walk.t += dt * 0.35;
@@ -276,7 +276,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
       controls.update();
 
-      // Animated pulse on egress lines & Emergency Red-Alert beacon
       const t = now * 0.0025;
       for (const line of egressLinesRef.current) {
         const mat = line.material as THREE.LineBasicMaterial;
@@ -284,11 +283,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       }
 
       if (alertLightRef.current) {
-        if (lightingModeRef.current === 'emergency') {
-          alertLightRef.current.intensity = 1.6 + 1.1 * Math.sin(t * 3.8);
-        } else {
-          alertLightRef.current.intensity = 0;
-        }
+        alertLightRef.current.intensity =
+          lightingModeRef.current === 'emergency' ? 1.6 + 1.1 * Math.sin(t * 3.8) : 0;
       }
 
       renderer.render(scene, camera);
@@ -300,6 +296,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       resizeObserver.disconnect();
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onWindowBlur);
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       renderer.domElement.removeEventListener('pointerup', onPointerUp);
       renderer.domElement.removeEventListener('webglcontextlost', onContextLost);
@@ -323,7 +320,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Update lighting rig colors & intensities for Circadian / Emergency lighting modes
+  // Update lighting rig for Circadian / Emergency lighting modes
   useEffect(() => {
     const ambient = ambientLightRef.current;
     const key = keyLightRef.current;
@@ -332,7 +329,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     if (!ambient || !key || !rim || !scene) return;
 
     if (lightingMode === 'sleep') {
-      // NASA-STD-3001 Circadian Pre-Sleep Shift: low-lux warm amber + depleted blue
       ambient.color.setHex(0x334155);
       ambient.intensity = 0.42;
       key.color.setHex(0xfbbf24);
@@ -341,7 +337,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       rim.intensity = 0.25;
       scene.fog = new THREE.FogExp2(0x070a12, 0.018);
     } else if (lightingMode === 'emergency') {
-      // Emergency SPE / Red-Alert Mode
       ambient.color.setHex(0x7f1d1d);
       ambient.intensity = 0.58;
       key.color.setHex(0xfda4af);
@@ -350,7 +345,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       rim.intensity = 0.85;
       scene.fog = new THREE.FogExp2(0x16070b, 0.02);
     } else {
-      // Nominal 4500K Work Day Mode
       ambient.color.setHex(0xcbd5e1);
       ambient.intensity = 0.78;
       key.color.setHex(0xe0f2fe);
@@ -361,13 +355,16 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     }
   }, [lightingMode]);
 
-  // Apply camera presets smoothly (including First-Person Astronaut Eye-Level View)
+  // Apply camera presets & clear stuck movement keys on exit
   useEffect(() => {
     const cam = cameraRef.current;
     const ctrl = controlsRef.current;
     if (!cam || !ctrl) return;
     walkProgressRef.current.active = false;
     setWalkingEgress(false);
+    if (cameraPreset !== 'first_person') {
+      pressedKeysRef.current.clear();
+    }
 
     const { width, depth, wall, deckHeight } = getHullBounds(mission.hull);
     const totalH = mission.hull.decks * deckHeight;
@@ -444,7 +441,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       walkProgressRef.current = { active: true, pts: vecs, t: 0 };
       setWalkingEgress(true);
     } else {
-      // Fallback straight spine translation walk
       const vecs = [
         new THREE.Vector3(-cx + 1.0, eyeY, 0),
         new THREE.Vector3(0, eyeY, 0),
@@ -480,9 +476,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const cz = hullD / 2;
     const totalHeight = hull.decks * deckHeight;
 
-    // 1. Outer Pressure Hull Shell
     const isCut = cameraPreset === 'cutaway' || cameraPreset === 'first_person';
-    const hullOpacity = cameraPreset === 'cutaway' ? 0.07 : cameraPreset === 'first_person' ? 0.12 : 0.16;
+    const hullOpacity =
+      cameraPreset === 'cutaway' ? 0.07 : cameraPreset === 'first_person' ? 0.12 : 0.16;
     const hullColor =
       lightingMode === 'emergency'
         ? 0xf43f5e
@@ -523,14 +519,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       group.add(wire);
     } else {
       const radius = Math.max(hull.diameter / 2, totalHeight / 2 + 0.3);
-      const cylGeo = new THREE.CylinderGeometry(
-        radius,
-        radius,
-        hull.length,
-        32,
-        1,
-        isCut
-      );
+      const cylGeo = new THREE.CylinderGeometry(radius, radius, hull.length, 32, 1, isCut);
       cylGeo.rotateZ(Math.PI / 2);
       const cylMat = new THREE.MeshPhysicalMaterial({
         color: hullColor,
@@ -560,7 +549,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       }
     }
 
-    // 2. Deck Floor Plates + ISS/Skylab Local-Vertical Reference Stripes
     const showOrientation = readonly ? true : store.showOrientationCues;
     for (let d = 0; d < hull.decks; d++) {
       const yDeck = d * deckHeight;
@@ -596,8 +584,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       (gridHelper.material as THREE.Material).opacity = 0.32;
       group.add(gridHelper);
 
-      // NASA-STD-3001 [V2 8011] Local-Vertical Visual Reference Cues:
-      // Nadir Floor Blue Translation Stripe + Zenith Overhead Luminaire Rail
       if (showOrientation) {
         const nadirGeo = new THREE.BoxGeometry(floorSpanX * 0.92, 0.015, 0.28);
         const nadirMat = new THREE.MeshBasicMaterial({
@@ -636,9 +622,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     }
     const waterSet = new Set(report.waterWall?.contributingZoneIds ?? []);
 
-    // 3. Extruded Habitat Modules + Orientation Top Stripes + Crew Figures
     for (const z of zones) {
-      const cat = ZONE_CATALOG[z.type];
+      const cat = ZONE_CATALOG[z.type] ?? ZONE_CATALOG.stowage;
       const yBase = z.deck * deckHeight;
       const boxH = Math.min(z.zHeight, deckHeight - 0.16);
       const isSelected = !readonly && store.selectedZoneId === z.id;
@@ -691,7 +676,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       edgeLines.position.copy(mesh.position);
       group.add(edgeLines);
 
-      // Rack Local-Vertical Header Band showing 0/90/180/270 deg orientation
       if (showOrientation) {
         const isMisaligned0g = mission.gravity === '0g' && z.rotation !== 0;
         const bandW = z.rotation === 90 || z.rotation === 270 ? 0.12 : z.width * 0.82;
@@ -715,7 +699,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         group.add(band);
       }
 
-      // Water-Wall / Storm Shelter HDPE Jacket Aura
       if (z.type === 'storm_shelter' || waterSet.has(z.id)) {
         const auraGeo = new THREE.BoxGeometry(z.width + 0.14, boxH + 0.1, z.height + 0.14);
         const auraMat = new THREE.MeshBasicMaterial({
@@ -729,7 +712,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         group.add(aura);
       }
 
-      // 1.75m Astronaut Scale Figure inside Crew Quarters & Galley
       if (z.type === 'crew_quarters' || z.type === 'galley') {
         const bodyGeo = new THREE.CapsuleGeometry(0.15, 1.08, 4, 8);
         const bodyMat = new THREE.MeshStandardMaterial({
@@ -742,7 +724,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       }
     }
 
-    // 4. 3D A* Emergency Egress + IMV Airflow Ribbons
     if (store.showEgressOverlay || readonly) {
       const addPathRibbon = (
         points: Array<{ x: number; y: number }>,
@@ -804,27 +785,32 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
   if (webglError) {
     return (
-      <div className="w-full h-full bg-[#090D16] flex flex-col items-center justify-center p-6 text-center">
-        <Video className="w-7 h-7 text-slate-500 mb-2" />
-        <div className="text-xs font-semibold text-slate-300">3D WebGL Viewport Unavailable</div>
-        <div className="text-[11px] text-slate-500 mt-1">{webglError}</div>
+      <div className="w-full h-full bg-[var(--surface-canvas)] flex flex-col items-center justify-center p-6 text-center">
+        <Video className="w-7 h-7 text-[var(--text-muted)] mb-2" />
+        <div className="text-xs font-semibold text-[var(--text-primary)]">
+          3D WebGL Viewport Unavailable
+        </div>
+        <div className="text-[11px] text-[var(--text-muted)] mt-1">{webglError}</div>
       </div>
     );
   }
 
   return (
-    <div className="relative w-full h-full bg-[#090D16] overflow-hidden select-none">
-      {/* Top Floating Camera & Lighting Controls */}
-      <div className="absolute top-2 left-2 right-2 z-10 flex flex-wrap items-center justify-between gap-1.5 pointer-events-none">
-        <div className="flex items-center gap-1.5 pointer-events-auto flex-wrap">
-          <span className="px-2 py-0.5 rounded bg-[#111827]/90 border border-slate-700/80 text-[10px] font-mono-telemetry uppercase tracking-wider text-sky-300">
-            3D WEBGL • {mission.hull.decks}D
+    <div className="w-full h-full bg-[var(--surface-canvas)] flex flex-col overflow-hidden select-none">
+      {/* Docked 3D Camera & Circadian Lighting Strip (Never obscures hull) */}
+      <div className="min-h-8 shrink-0 bg-[var(--surface-panel)] border-b border-[var(--border-subtle)] px-2.5 py-1 flex flex-wrap items-center justify-between gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[10px] font-mono-telemetry uppercase tracking-wider text-sky-300 font-semibold">
+            3D WebGL • {mission.hull.decks}D
           </span>
 
           {!readonly && (
             <>
-              {/* Lighting Mode Selector (NASA-STD-3001 Circadian / Emergency) */}
-              <div className="flex items-center bg-[#111827]/95 border border-slate-700/80 rounded p-0.5 gap-0.5">
+              <div
+                role="group"
+                aria-label="3D Lighting Mode"
+                className="flex items-center bg-[var(--surface-canvas)] border border-[var(--border-subtle)] rounded p-0.5 gap-0.5"
+              >
                 {(
                   [
                     { id: 'day', label: 'Day', icon: <Sun className="w-3 h-3" /> },
@@ -835,6 +821,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                   <button
                     key={lm.id}
                     type="button"
+                    aria-pressed={lightingMode === lm.id}
                     onClick={() => store.setLightingMode(lm.id)}
                     className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
                       lightingMode === lm.id
@@ -843,7 +830,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                           : lm.id === 'sleep'
                             ? 'bg-amber-500/25 text-amber-200'
                             : 'bg-cyan-500/20 text-cyan-200'
-                        : 'text-slate-400 hover:text-slate-200'
+                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                     }`}
                     title={`Lighting Mode: ${lm.label}`}
                   >
@@ -855,11 +842,12 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
               <button
                 type="button"
+                aria-pressed={store.showOrientationCues}
                 onClick={store.toggleOrientationCues}
                 className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors cursor-pointer ${
                   store.showOrientationCues
                     ? 'bg-sky-500/15 text-sky-200 border-sky-500/40'
-                    : 'bg-[#111827]/90 text-slate-400 border-slate-700/80'
+                    : 'bg-[var(--surface-elevated)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:text-[var(--text-primary)]'
                 }`}
                 title="Toggle ISS/Skylab Nadir/Zenith Orientation Cues"
               >
@@ -870,7 +858,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           )}
         </div>
 
-        <div className="flex items-center bg-[#111827]/95 border border-slate-700/80 rounded p-0.5 gap-0.5 pointer-events-auto">
+        <div
+          role="group"
+          aria-label="3D Camera Preset"
+          className="flex items-center bg-[var(--surface-canvas)] border border-[var(--border-subtle)] rounded p-0.5 gap-0.5"
+        >
           {(
             [
               { id: 'perspective', label: 'Orbit', icon: <Video className="w-3 h-3" /> },
@@ -882,11 +874,12 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
             <button
               key={btn.id}
               type="button"
+              aria-pressed={cameraPreset === btn.id}
               onClick={() => setCameraPreset(btn.id)}
               className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
                 cameraPreset === btn.id
                   ? 'bg-sky-500/25 text-sky-200'
-                  : 'text-slate-400 hover:text-slate-200'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
               }`}
             >
               {btn.icon}
@@ -896,33 +889,34 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         </div>
       </div>
 
-      {/* First-Person Astronaut HUD Banner */}
+      {/* WebGL Canvas Container */}
+      <div className="relative flex-1 min-h-0 w-full">
+        <div ref={containerRef} className="w-full h-full" />
+
+        {contextLost && (
+          <div className="absolute inset-0 z-20 bg-[var(--surface-canvas)]/90 flex items-center justify-center text-xs text-amber-300 font-mono-telemetry">
+            WebGL Context Paused — Restoring GPU Surface…
+          </div>
+        )}
+      </div>
+
+      {/* First-Person Astronaut HUD Dock */}
       {cameraPreset === 'first_person' && !readonly && (
-        <div className="absolute bottom-2 left-2 right-2 z-10 flex flex-wrap items-center justify-between gap-2 bg-[#111827]/92 border border-sky-500/40 rounded-lg px-2.5 py-1 text-[10px] text-slate-200">
+        <div className="shrink-0 bg-[var(--surface-panel)] border-t border-sky-500/40 px-3 py-1 flex flex-wrap items-center justify-between gap-2 text-[10px] text-[var(--text-secondary)]">
           <span className="font-mono-telemetry">
-            ASTRONAUT EYE ({mission.gravity === '0g' ? '1.18m 0g Float' : '1.70m Standing'}) • WASD /
-            Arrows or Click Floor to Translate
+            ASTRONAUT EYE ({mission.gravity === '0g' ? '1.18m 0g Float' : '1.70m Standing'}) • WASD
+            or Click Floor to Translate
           </span>
           <button
             type="button"
             onClick={startEgressWalkthrough}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 font-medium cursor-pointer"
+            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 font-medium cursor-pointer"
           >
             <Play className="w-2.5 h-2.5" />
             {walkingEgress ? 'Walking A* Path…' : 'Walk A* Egress'}
           </button>
         </div>
       )}
-
-      {/* WebGL Context Lost Recovery Notice */}
-      {contextLost && (
-        <div className="absolute inset-0 z-20 bg-[#090D16]/90 flex items-center justify-center text-xs text-amber-300 font-mono-telemetry">
-          WebGL Context Paused — Restoring GPU Surface…
-        </div>
-      )}
-
-      {/* Three.js Mount Target */}
-      <div ref={containerRef} className="w-full h-full" />
     </div>
   );
 };

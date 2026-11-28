@@ -25,12 +25,10 @@ export const App: React.FC = () => {
   } = useHabitatStore();
   const [splitMode, setSplitMode] = useState<ViewportSplit>('split');
 
-  // Initial live NOAA GOES fetch on mount (with clean offline fallback)
   useEffect(() => {
     void fetchLiveWeather();
   }, [fetchLiveWeather]);
 
-  // Global CAD keyboard shortcuts: Undo, Redo, Rotate (R), Delete/Backspace, Escape
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -81,20 +79,20 @@ export const App: React.FC = () => {
 
   return (
     <ErrorBoundary panelName="Space Habitat Studio">
-      <div className="h-dvh w-screen flex flex-col bg-[#090D16] text-slate-100 overflow-hidden">
+      <div className="h-dvh w-screen flex flex-col bg-[var(--surface-canvas)] text-[var(--text-primary)] overflow-hidden">
         <TopBar />
         <JudgeTourBanner />
 
         {activeView === 'studio' && (
           <div className="flex-1 flex min-h-0 overflow-hidden relative">
-            {/* Desktop Left Rail (>= 1024px) */}
+            {/* Desktop Left Rail */}
             <div className="hidden lg:flex h-full">
               <ErrorBoundary panelName="Zone & Hull Configurator">
                 <LeftSidebar />
               </ErrorBoundary>
             </div>
 
-            {/* Mobile Slide-Over Drawers (< 1024px) */}
+            {/* Mobile Slide-Over Drawers */}
             {mobileDrawer !== 'none' && (
               <div
                 className="fixed inset-0 z-40 bg-black/70 lg:hidden flex"
@@ -114,15 +112,14 @@ export const App: React.FC = () => {
             )}
 
             {/* Synchronized 2D + 3D Center Workspace */}
-            <main className="flex-1 flex flex-col min-w-0 min-h-0 relative bg-[#090D16]">
-              {/* Viewport Layout Switcher */}
-              <div className="min-h-8 py-1 shrink-0 bg-[#0D1320]/90 border-b border-slate-800/80 px-2 flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
-                <div className="flex items-center gap-1 min-w-0">
-                  {/* Mobile Drawer Triggers */}
+            <main className="flex-1 flex flex-col min-w-0 min-h-0 relative bg-[var(--surface-canvas)]">
+              {/* Viewport Split Switcher */}
+              <div className="min-h-8 py-1 shrink-0 bg-[var(--surface-panel)] border-b border-[var(--border-subtle)] px-2.5 flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
+                <div className="flex items-center gap-1.5 min-w-0">
                   <button
                     type="button"
                     onClick={() => setMobileDrawer('left')}
-                    className="lg:hidden inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 text-cyan-300 border border-slate-700 text-[10px] font-medium cursor-pointer shrink-0"
+                    className="lg:hidden inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[var(--surface-elevated)] text-cyan-200 border border-[var(--border-strong)] text-[10px] font-medium cursor-pointer shrink-0"
                   >
                     <Box className="w-3 h-3" />
                     <span>Modules</span>
@@ -130,18 +127,24 @@ export const App: React.FC = () => {
                   <button
                     type="button"
                     onClick={runAutoOptimize}
-                    className="lg:hidden inline-flex items-center gap-1 px-2 py-0.5 rounded bg-cyan-600/25 text-cyan-200 border border-cyan-500/40 text-[10px] font-medium cursor-pointer shrink-0"
+                    className="lg:hidden inline-flex items-center gap-1 px-2 py-0.5 rounded bg-cyan-400 text-slate-950 text-[10px] font-bold cursor-pointer shrink-0"
                   >
                     <Sparkles className="w-3 h-3" />
                     <span>Optimize</span>
                   </button>
-                  <span className="hidden lg:inline text-slate-400 font-mono-telemetry truncate">
-                    SYNCHRONIZED CAD • DRAG / RESIZE / [R] ROTATE / [DEL] REMOVE / [ESC] CLEAR
+                  <span className="hidden lg:inline text-[var(--text-muted)] text-[11px] truncate">
+                    Shortcuts: <span className="font-mono-telemetry text-[var(--text-secondary)]">R</span> rotate •{' '}
+                    <span className="font-mono-telemetry text-[var(--text-secondary)]">Del</span> remove •{' '}
+                    <span className="font-mono-telemetry text-[var(--text-secondary)]">Ctrl+Z</span> undo
                   </span>
                 </div>
 
-                <div className="flex items-center gap-1 shrink-0">
-                  <div className="flex items-center bg-[#090D16] border border-slate-800 rounded p-0.5 gap-0.5">
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <div
+                    role="group"
+                    aria-label="Viewport Mode"
+                    className="flex items-center bg-[var(--surface-canvas)] border border-[var(--border-subtle)] rounded p-0.5 gap-0.5"
+                  >
                     {(
                       [
                         { id: 'split', label: 'Split 2D+3D', shortLabel: 'Split' },
@@ -152,11 +155,12 @@ export const App: React.FC = () => {
                       <button
                         key={m.id}
                         type="button"
+                        aria-pressed={splitMode === m.id}
                         onClick={() => setSplitMode(m.id)}
-                        className={`px-1.5 sm:px-2 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
+                        className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
                           splitMode === m.id
-                            ? 'bg-cyan-500/20 text-cyan-300'
-                            : 'text-slate-400 hover:text-slate-200'
+                            ? 'bg-cyan-500/20 text-cyan-200'
+                            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                         }`}
                       >
                         <span className="hidden sm:inline">{m.label}</span>
@@ -168,10 +172,12 @@ export const App: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setMobileDrawer('right')}
-                    className="lg:hidden inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 text-amber-300 border border-slate-700 text-[10px] font-mono-telemetry cursor-pointer"
+                    className="lg:hidden inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[var(--surface-elevated)] text-amber-200 border border-[var(--border-strong)] text-[10px] font-mono-telemetry cursor-pointer"
                   >
                     <ShieldAlert className="w-3 h-3" />
-                    {report.criticalCount}C/{report.warningCount}W
+                    <span>
+                      {report.criticalCount}C/{report.warningCount}W
+                    </span>
                   </button>
                 </div>
               </div>
@@ -180,7 +186,7 @@ export const App: React.FC = () => {
                 {splitMode !== '3d' && (
                   <div
                     className={`${
-                      splitMode === 'split' ? 'h-[53%] border-b border-slate-800' : 'h-full'
+                      splitMode === 'split' ? 'h-[53%] border-b border-[var(--border-subtle)]' : 'h-full'
                     } w-full min-h-0`}
                   >
                     <ErrorBoundary panelName="2D Blueprint Viewport">
@@ -200,7 +206,7 @@ export const App: React.FC = () => {
               </div>
             </main>
 
-            {/* Desktop Right Inspector Rail (>= 1024px) */}
+            {/* Desktop Right Inspector Rail */}
             <div className="hidden lg:flex h-full">
               <ErrorBoundary panelName="Engineering Inspector">
                 <EngineeringInspector />

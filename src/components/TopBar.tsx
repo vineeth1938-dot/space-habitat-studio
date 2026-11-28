@@ -43,12 +43,18 @@ export const TopBar: React.FC = () => {
 
   const scoreColor =
     report.score >= 85
-      ? 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10'
+      ? 'text-emerald-200 border-emerald-500/45 bg-emerald-500/12'
       : report.score >= 60
-        ? 'text-amber-300 border-amber-500/40 bg-amber-500/10'
-        : 'text-rose-300 border-rose-500/40 bg-rose-500/10';
+        ? 'text-amber-200 border-amber-500/45 bg-amber-500/12'
+        : 'text-rose-200 border-rose-500/45 bg-rose-500/12';
 
-  const navTabs: Array<{ id: ActiveView; label: string; shortLabel: string; icon: React.ReactNode; badge?: string }> = [
+  const navTabs: Array<{
+    id: ActiveView;
+    label: string;
+    shortLabel: string;
+    icon: React.ReactNode;
+    badge?: string;
+  }> = [
     {
       id: 'studio',
       label: 'Studio 2D/3D',
@@ -72,31 +78,31 @@ export const TopBar: React.FC = () => {
   ];
 
   return (
-    <header className="min-h-12 shrink-0 bg-[#0D1320] border-b border-slate-800/90 px-2.5 lg:px-3 py-1.5 flex flex-wrap lg:flex-nowrap items-center justify-between gap-1.5 xl:gap-2 select-none">
+    <header className="min-h-12 shrink-0 bg-[var(--surface-panel)] border-b border-[var(--border-subtle)] px-2.5 lg:px-3 py-1.5 flex flex-wrap lg:flex-nowrap items-center justify-between gap-1.5 xl:gap-2 select-none">
       {/* Brand + Historical Heritage Preset Switcher */}
       <div className="flex items-center gap-2 min-w-0">
         <div className="flex items-center gap-2 shrink-0">
           <div className="w-7 h-7 rounded-md bg-cyan-500/15 border border-cyan-500/40 flex items-center justify-center">
-            <Compass className="w-4 h-4 text-cyan-400" />
+            <Compass className="w-4 h-4 text-cyan-300" />
           </div>
           <div className="leading-tight hidden sm:block">
-            <div className="text-xs font-bold tracking-wide text-slate-100 uppercase">
+            <div className="text-xs font-bold tracking-wide text-[var(--text-primary)] uppercase">
               Space Habitat Studio
             </div>
-            <div className="text-[9px] font-mono-telemetry text-cyan-400/85 hidden xl:block">
+            <div className="text-[10px] font-mono-telemetry text-cyan-300 hidden xl:block">
               NASA-STD-3001 • HRP CAD
             </div>
           </div>
         </div>
 
-        <div className="h-5 w-px bg-slate-800 hidden md:block" />
+        <div className="h-5 w-px bg-[var(--border-subtle)] hidden md:block" />
 
         {/* Preset Selector */}
         <select
           aria-label="Habitat Preset"
           value={activePresetId}
           onChange={(e) => loadPreset(e.target.value)}
-          className="bg-[#111827] hover:bg-slate-800/80 border border-slate-700/80 text-slate-100 text-xs rounded-md px-2 py-1 max-w-[170px] sm:max-w-[205px] xl:max-w-[255px] truncate outline-none focus:border-cyan-500 transition-colors cursor-pointer"
+          className="bg-[var(--surface-elevated)] hover:bg-[var(--surface-hover)] border border-[var(--border-strong)] text-[var(--text-primary)] text-xs rounded-md px-2 py-1 max-w-[170px] sm:max-w-[205px] xl:max-w-[255px] truncate outline-none cursor-pointer transition-colors"
         >
           {HABITAT_PRESETS.map((p) => (
             <option key={p.id} value={p.id}>
@@ -109,7 +115,7 @@ export const TopBar: React.FC = () => {
       {/* Center View Mode Tabs */}
       <nav
         aria-label="Workspace Views"
-        className="flex items-center bg-[#090D16] p-0.5 rounded-lg border border-slate-800/80 gap-0.5"
+        className="flex items-center bg-[var(--surface-canvas)] p-0.5 rounded-lg border border-[var(--border-subtle)] gap-0.5"
       >
         {navTabs.map((tab) => {
           const active = activeView === tab.id;
@@ -121,7 +127,7 @@ export const TopBar: React.FC = () => {
               className={`flex items-center gap-1.5 px-2 xl:px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
                 active
                   ? 'bg-cyan-500/15 text-cyan-200 border border-cyan-500/40'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)]/60 border border-transparent'
               }`}
             >
               {tab.icon}
@@ -129,14 +135,14 @@ export const TopBar: React.FC = () => {
               <span className="md:hidden">{tab.shortLabel}</span>
               {tab.badge && (
                 <span
-                  className={`text-[9px] font-mono-telemetry px-1.5 py-0.2 rounded-full ${
+                  className={`text-[10px] font-mono-telemetry px-1.5 py-0.2 rounded-full ${
                     tab.badge === 'FAIL'
-                      ? 'bg-rose-500/20 text-rose-300'
+                      ? 'bg-rose-500/20 text-rose-200'
                       : tab.badge === 'MARGINAL'
-                        ? 'bg-amber-500/20 text-amber-300'
+                        ? 'bg-amber-500/20 text-amber-200'
                         : tab.badge === 'PASS'
-                          ? 'bg-emerald-500/20 text-emerald-300'
-                          : 'bg-slate-700/80 text-slate-300'
+                          ? 'bg-emerald-500/20 text-emerald-200'
+                          : 'bg-[var(--surface-elevated)] text-[var(--text-primary)]'
                   }`}
                 >
                   {tab.badge}
@@ -147,7 +153,7 @@ export const TopBar: React.FC = () => {
         })}
       </nav>
 
-      {/* Right Actions: Demo Tour, Undo/Redo, Snapshot, Audit Export, Readiness Score */}
+      {/* Right Actions */}
       <div className="flex items-center gap-1.5 whitespace-nowrap">
         <button
           type="button"
@@ -155,7 +161,7 @@ export const TopBar: React.FC = () => {
           className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border transition-colors cursor-pointer ${
             judgeTourActive
               ? 'bg-cyan-500/20 text-cyan-200 border-cyan-400/60'
-              : 'bg-[#111827] hover:bg-slate-800 text-cyan-300 border-slate-700/80'
+              : 'bg-[var(--surface-elevated)] hover:bg-[var(--surface-hover)] text-cyan-200 border-[var(--border-subtle)]'
           }`}
           title="Launch 4-Step Judge Demo Walkthrough"
         >
@@ -163,25 +169,25 @@ export const TopBar: React.FC = () => {
           <span className="hidden sm:inline">Demo Tour</span>
         </button>
 
-        <div className="flex items-center bg-[#111827] border border-slate-800 rounded-md overflow-hidden">
+        <div className="flex items-center bg-[var(--surface-elevated)] border border-[var(--border-subtle)] rounded-md overflow-hidden">
           <button
             type="button"
             onClick={undo}
             disabled={past.length === 0}
             title="Undo (Ctrl+Z)"
             aria-label="Undo"
-            className="p-1.5 text-slate-300 hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            className="p-1.5 text-[var(--text-primary)] hover:bg-[var(--surface-hover)] disabled:opacity-35 disabled:cursor-not-allowed transition-colors cursor-pointer"
           >
             <Undo2 className="w-3.5 h-3.5" />
           </button>
-          <div className="w-px h-4 bg-slate-800" />
+          <div className="w-px h-4 bg-[var(--border-subtle)]" />
           <button
             type="button"
             onClick={redo}
             disabled={future.length === 0}
             title="Redo (Ctrl+Y)"
             aria-label="Redo"
-            className="p-1.5 text-slate-300 hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            className="p-1.5 text-[var(--text-primary)] hover:bg-[var(--surface-hover)] disabled:opacity-35 disabled:cursor-not-allowed transition-colors cursor-pointer"
           >
             <Redo2 className="w-3.5 h-3.5" />
           </button>
@@ -191,16 +197,16 @@ export const TopBar: React.FC = () => {
           type="button"
           onClick={handleSaveSnapshot}
           title="Save Layout Snapshot"
-          className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-[#111827] hover:bg-slate-800 border border-slate-700/80 text-slate-200 transition-colors cursor-pointer"
+          className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-[var(--surface-elevated)] hover:bg-[var(--surface-hover)] border border-[var(--border-subtle)] text-[var(--text-primary)] transition-colors cursor-pointer"
         >
           {savedToast ? (
             <>
-              <Check className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="text-emerald-300 hidden xl:inline">Saved</span>
+              <Check className="w-3.5 h-3.5 text-emerald-300" />
+              <span className="text-emerald-200 hidden xl:inline">Saved</span>
             </>
           ) : (
             <>
-              <Camera className="w-3.5 h-3.5 text-cyan-400" />
+              <Camera className="w-3.5 h-3.5 text-cyan-300" />
               <span className="hidden xl:inline">Snapshot</span>
             </>
           )}
@@ -210,9 +216,9 @@ export const TopBar: React.FC = () => {
           type="button"
           onClick={() => setAuditModalOpen(true)}
           title="Export NASA-STD-3001 Verification Report (JSON / Printable PDF)"
-          className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-[#111827] hover:bg-slate-800 border border-slate-700/80 text-slate-200 transition-colors cursor-pointer"
+          className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-[var(--surface-elevated)] hover:bg-[var(--surface-hover)] border border-[var(--border-subtle)] text-[var(--text-primary)] transition-colors cursor-pointer"
         >
-          <FileCheck2 className="w-3.5 h-3.5 text-emerald-400" />
+          <FileCheck2 className="w-3.5 h-3.5 text-emerald-300" />
           <span className="hidden xl:inline">Export Audit</span>
           <span className="hidden lg:inline xl:hidden">Audit</span>
         </button>
@@ -220,7 +226,7 @@ export const TopBar: React.FC = () => {
         <div
           className={`flex items-center gap-1.5 px-2 py-1 rounded-md border font-mono-telemetry text-xs font-bold ${scoreColor}`}
         >
-          <span className="text-[9px] font-normal opacity-80 hidden sm:inline">SCORE</span>
+          <span className="text-[10px] font-normal opacity-85 hidden sm:inline">SCORE</span>
           <span>{report.score}/100</span>
         </div>
       </div>

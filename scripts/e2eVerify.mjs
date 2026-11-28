@@ -282,12 +282,16 @@ async function main() {
     }
     await cdp.screenshot('04-solar-storm-x10-1440x900.png');
 
-    // 6. Side-by-Side Compare Mode
-    await cdp.eval(`(async () => {
+    // 6. Side-by-Side Compare Mode + Check Unblocked Egress delta badge
+    const compareCheck = await cdp.eval(`(async () => {
       const navBtns = Array.from(document.querySelectorAll('nav button'));
       navBtns.find(b => b.textContent?.includes('Compare'))?.click();
       await new Promise(r => setTimeout(r, 250));
+      return {
+        hasUnblocked: document.body.innerText.includes('UNBLOCKED'),
+      };
     })()`);
+    console.log('[Gate 4] Compare Mode check:', compareCheck);
     await cdp.screenshot('05-compare-mode-1440x900.png');
 
     // 7. Export NASA-STD-3001 Audit Modal + Escape close

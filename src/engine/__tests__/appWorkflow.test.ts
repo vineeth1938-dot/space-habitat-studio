@@ -76,7 +76,29 @@ describe('End-to-End Studio Workflow & Interactive Judge Tour (Store Integration
     expect(useHabitatStore.getState().activeView).toBe('compare');
     expect(useHabitatStore.getState().compareIds[1]).toBe(LIVE_SNAPSHOT_ID);
 
-    // 8. Clear all zones (0-zone edge case) & undo back
+    // 8. Module pinning (lock) protects position during manual move & Auto-Optimize
+    useHabitatStore.getState().loadPreset('cramped-faulty-baseline');
+    const pinTarget = useHabitatStore.getState().zones[0];
+    const origX = pinTarget.x;
+    const origY = pinTarget.y;
+    useHabitatStore.getState().toggleZoneLock(pinTarget.id);
+    useHabitatStore.getState().moveZone(pinTarget.id, origX + 3, origY + 2, true);
+    expect(useHabitatStore.getState().zones[0].x).toBe(origX);
+    expect(useHabitatStore.getState().zones[0].y).toBe(origY);
+    useHabitatStore.getState().runAutoOptimize();
+    const afterOptPinned = useHabitatStore.getState().zones.find((z) => z.id === pinTarget.id)!;
+    expect(afterOptPinned.x).toBe(origX);
+    expect(afterOptPinned.y).toBe(origY);
+
+    // 9. Duplicate + Undo prunes stale selectedZoneId cleanly
+    useHabitatStore.getState().duplicateZone(pinTarget.id);
+    const dupId = useHabitatStore.getState().selectedZoneId;
+    expect(dupId).not.toBeNull();
+    expect(useHabitatStore.getState().zones.some((z) => z.id === dupId)).toBe(true);
+    useHabitatStore.getState().undo();
+    expect(useHabitatStore.getState().selectedZoneId).toBeNull();
+
+    // 10. Clear all zones (0-zone edge case) & undo back
     useHabitatStore.getState().clearAllZones();
     expect(useHabitatStore.getState().zones.length).toBe(0);
     useHabitatStore.getState().undo();

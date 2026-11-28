@@ -48,11 +48,11 @@ export const JudgeTourBanner: React.FC = () => {
   const isLast = judgeTourStep === 3;
 
   return (
-    <div className="shrink-0 bg-gradient-to-r from-[#0c192c] via-[#102039] to-[#0c192c] border-b border-cyan-500/40 px-3 py-2 flex flex-wrap items-center justify-between gap-2.5 text-xs select-none">
+    <div className="shrink-0 bg-[var(--surface-elevated)] border-b border-cyan-500/45 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs select-none">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-cyan-500/20 border border-cyan-400/40 text-cyan-200 font-semibold text-[11px]">
           <Sparkles className="w-3 h-3 text-cyan-300" />
-          Judge Demo Walkthrough
+          <span>Judge Demo Walkthrough</span>
         </span>
 
         <div className="flex items-center gap-1 flex-wrap">
@@ -66,13 +66,13 @@ export const JudgeTourBanner: React.FC = () => {
                 onClick={() => runJudgeTourStep(item.step)}
                 className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium border transition-colors cursor-pointer ${
                   active
-                    ? 'bg-cyan-500/25 text-white border-cyan-400/70'
+                    ? 'bg-cyan-500/25 text-[var(--text-primary)] border-cyan-400/70'
                     : done
                       ? 'bg-emerald-500/15 text-emerald-200 border-emerald-500/35'
-                      : 'bg-[#090D16]/70 text-slate-300 border-slate-700/80 hover:text-white'
+                      : 'bg-[var(--surface-canvas)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:text-[var(--text-primary)]'
                 }`}
               >
-                {done && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
+                {done && <CheckCircle2 className="w-3 h-3 text-emerald-300" />}
                 <span>{item.shortTitle}</span>
               </button>
             );
@@ -81,7 +81,7 @@ export const JudgeTourBanner: React.FC = () => {
       </div>
 
       <div className="flex items-center gap-2 ml-auto">
-        <span className="text-[11px] text-slate-300 hidden 2xl:inline max-w-md truncate">
+        <span className="text-[11px] text-[var(--text-secondary)] hidden 2xl:inline max-w-md truncate">
           {current.summary}
         </span>
 
@@ -89,19 +89,19 @@ export const JudgeTourBanner: React.FC = () => {
           <button
             type="button"
             onClick={() => runJudgeTourStep((judgeTourStep + 1) as 0 | 1 | 2 | 3)}
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-[11px] cursor-pointer transition-colors"
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold text-[11px] cursor-pointer transition-colors"
           >
-            Next Step
+            <span>Next Step</span>
             <ArrowRight className="w-3 h-3" />
           </button>
         ) : (
           <button
             type="button"
             onClick={() => setAuditModalOpen(true)}
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-[11px] cursor-pointer transition-colors"
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-bold text-[11px] cursor-pointer transition-colors"
           >
             <FileCheck2 className="w-3.5 h-3.5" />
-            Export Audit Report
+            <span>Export Audit Report</span>
           </button>
         )}
 
@@ -109,7 +109,7 @@ export const JudgeTourBanner: React.FC = () => {
           type="button"
           aria-label="Exit Judge Demo Walkthrough"
           onClick={() => setJudgeTour(false)}
-          className="p-1 rounded text-slate-400 hover:text-slate-100 hover:bg-slate-800/80 cursor-pointer"
+          className="p-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] cursor-pointer"
         >
           <X className="w-3.5 h-3.5" />
         </button>

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { HABITAT_PRESETS } from '../../data/presets';
-import { clampZoneToHull, isRectInsideHull, sanitizeMissionConfig } from '../hullMath';
+import {
+  clampZoneToHull,
+  getRectOverlapArea,
+  isRectInsideHull,
+  resolveDeckAndHullCollisions,
+  sanitizeMissionConfig,
+  sanitizeZoneNode,
+} from '../hullMath';
 import { evaluateHabitat, getRequiredNhvPerCrew } from '../ruleEngine';
 import { evaluateEgressAStar } from '../egressAStar';
 import { autoOptimizeLayout } from '../autoOptimize';
@@ -422,5 +429,102 @@ describe('A* Egress, Auto-Optimize (<250ms), NOAA Parser & Export Report', () =>
     expect(audit.schemaVersion).toBe('NASA-STD-3001-SHS-CARBON4-1.0');
     expect(html).toContain('NASA-STD-3001 ENGINEERING VERIFICATION REPORT');
     expect(html).toContain(preset.mission.name);
+  });
+
+  it('sanitizes malformed legacy ZoneNodes and resolves overlaps on deck collapse', () => {
+    const hull = {
+      type: 'rigid_cylinder' as const,
+      diameter: 6.0,
+      length: 14.0,
+      decks: 1,
+      wallThickness: 0.25,
+    };
+
+    expect(sanitizeZoneNode({ type: 'unknown_legacy_zone', x: 1, y: 1 }, hull)).toBeNull();
+    expect(sanitizeZoneNode(null, hull)).toBeNull();
+
+    const sanitized = sanitizeZoneNode(
+      {
+        id: 'legacy-1',
+        type: 'crew_quarters',
+        label: 'Restored Bay',
+        deck: 2,
+        x: 1.5,
+        y: 1.0,
+        width: 2.0,
+        height: 1.5,
+        rotation: 45,
+        locked: true,
+      },
+      hull
+    );
+    expect(sanitized).not.toBeNull();
+    expect(sanitized!.rotation).toBe(0);
+    expect(sanitized!.deck).toBe(0);
+    expect(sanitized!.locked).toBe(true);
+
+    // Colliding zones reduced onto 1 deck must repack cleanly without overlaps
+    const mission = sanitizeMissionConfig({
+      name: 'Deck Collapse Test',
+      crewSize: 4,
+      durationDays: 180,
+      gravity: '0g',
+      hull,
+    });
+    const stackedOnDeck0: ZoneNode[] = [
+      {
+        id: 'a',
+        type: 'crew_quarters',
+        label: 'A',
+        deck: 0,
+        x: 1.0,
+        y: 0.5,
+        width: 2.0,
+        height: 1.5,
+        zHeight: 2.2,
+        rotation: 0,
+      },
+      {
+        id: 'b',
+        type: 'galley',
+        label: 'B',
+        deck: 0,
+        x: 1.0,
+        y: 0.5,
+        width: 2.5,
+        height: 1.75,
+        zHeight: 2.2,
+        rotation: 0,
+      },
+      {
+        id: 'c',
+        type: 'medical',
+        label: 'C',
+        deck: 0,
+        x: 1.25,
+        y: 0.75,
+        width: 2.25,
+        height: 1.75,
+        zHeight: 2.2,
+        rotation: 0,
+      },
+    ];
+
+    const resolved = resolveDeckAndHullCollisions(mission, stackedOnDeck0);
+    expect(resolved).toHaveLength(3);
+    for (let i = 0; i < resolved.length; i++) {
+      expect(
+        isRectInsideHull(
+          resolved[i].x,
+          resolved[i].y,
+          resolved[i].width,
+          resolved[i].height,
+          mission.hull
+        )
+      ).toBe(true);
+      for (let j = i + 1; j < resolved.length; j++) {
+        expect(getRectOverlapArea(resolved[i], resolved[j])).toBeLessThanOrEqual(0.02);
+      }
+    }
   });
 });

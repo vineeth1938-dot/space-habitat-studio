@@ -209,6 +209,109 @@ export function clampZoneToHull(zone: ZoneNode, hull: HullGeometry): ZoneNode {
   };
 }
 
+/**
+ * Validates and normalizes an untrusted ZoneNode (e.g. from localStorage snapshots),
+ * returning null if its structural identity or ZoneType is invalid.
+ */
+export function sanitizeZoneNode(
+  raw: unknown,
+  hull: HullGeometry,
+  fallbackIndex = 0
+): ZoneNode | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  if (typeof obj.type !== 'string' || !(obj.type in ZONE_CATALOG)) {
+    return null;
+  }
+  const zoneType = obj.type as ZoneNode['type'];
+  const cat = ZONE_CATALOG[zoneType];
+  const rotRaw = Number(obj.rotation);
+  const rotation: 0 | 90 | 180 | 270 =
+    rotRaw === 90 || rotRaw === 180 || rotRaw === 270 ? rotRaw : 0;
+  const id =
+    typeof obj.id === 'string' && obj.id.trim().length > 0
+      ? obj.id.trim().slice(0, 64)
+      : `${zoneType}-${fallbackIndex}`;
+  const label =
+    typeof obj.label === 'string' && obj.label.trim().length > 0
+      ? obj.label.trim().slice(0, 60)
+      : cat.label;
+
+  return clampZoneToHull(
+    {
+      id,
+      type: zoneType,
+      label,
+      deck: typeof obj.deck === 'number' ? obj.deck : 0,
+      x: typeof obj.x === 'number' ? obj.x : 1.0,
+      y: typeof obj.y === 'number' ? obj.y : 1.0,
+      width: typeof obj.width === 'number' ? obj.width : cat.defaultWidth,
+      height: typeof obj.height === 'number' ? obj.height : cat.defaultHeight,
+      zHeight: typeof obj.zHeight === 'number' ? obj.zHeight : cat.defaultZHeight,
+      rotation,
+      locked: Boolean(obj.locked),
+    },
+    hull
+  );
+}
+
+/**
+ * Relocates colliding or out-of-hull modules onto the nearest open 0.25m slot
+ * after hull shrinkage or deck-count reduction (e.g. 2D -> 1D), preserving
+ * non-colliding modules at their original positions whenever possible.
+ */
+export function resolveDeckAndHullCollisions(
+  rawMission: MissionConfig,
+  zones: ZoneNode[]
+): ZoneNode[] {
+  const mission = sanitizeMissionConfig(rawMission);
+  const { hull } = mission;
+  const { width, depth, wall } = getHullBounds(hull);
+  const placed: ZoneNode[] = [];
+
+  for (const raw of zones) {
+    const z = clampZoneToHull(raw, hull);
+    const fitsCurrent =
+      isRectInsideHull(z.x, z.y, z.width, z.height, hull) &&
+      placed.every((p) => getRectOverlapArea(z, p) <= 0.02);
+
+    if (fitsCurrent) {
+      placed.push(z);
+      continue;
+    }
+
+    const deckOrder = [z.deck];
+    for (let d = 0; d < hull.decks; d++) {
+      if (d !== z.deck) deckOrder.push(d);
+    }
+
+    let best: ZoneNode | null = null;
+    let bestDist = Infinity;
+
+    for (const d of deckOrder) {
+      for (let py = snapToGrid(wall + 0.25); py <= depth - wall - z.height + 1e-6; py += 0.25) {
+        for (let px = snapToGrid(wall + 0.25); px <= width - wall - z.width + 1e-6; px += 0.25) {
+          const sx = snapToGrid(px);
+          const sy = snapToGrid(py);
+          if (!isRectInsideHull(sx, sy, z.width, z.height, hull)) continue;
+          const probe: ZoneNode = { ...z, deck: d, x: sx, y: sy };
+          if (placed.some((p) => getRectOverlapArea(probe, p) > 0.02)) continue;
+          const dist = Math.hypot(sx - z.x, sy - z.y) + (d === z.deck ? 0 : 12);
+          if (dist < bestDist) {
+            bestDist = dist;
+            best = probe;
+          }
+        }
+      }
+      if (best) break;
+    }
+
+    placed.push(best ?? z);
+  }
+
+  return placed;
+}
+
 export function getRectOverlapArea(a: ZoneNode, b: ZoneNode): number {
   if (a.deck !== b.deck) return 0;
   const ox = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));

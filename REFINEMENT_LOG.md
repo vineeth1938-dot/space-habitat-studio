@@ -69,3 +69,28 @@ Completed a multi-pass autonomous engineering, human-factors verification, crash
   - Verified live against `vite preview` across `1440×900`, `1280×720`, and `390×844` viewports:
     - Preset cycling (`27`, `99`, `100`, `100`), real pointer drag, `R` rotation, `Ctrl+Z` undo, Airflow/Sleep/Crew-Eye 3D modes, Auto-Optimize (`27 -> 100`), X10 Solar Storm stress test, Compare Mode, Audit Export modal, and Judge Demo Walkthrough.
     - `Console Errors: 0`, `Page Errors: 0`, `Horizontal Overflow: false` across all viewports.
+
+---
+
+## Pass 2: Deep Bug/Crash Audit & Impeccable (`Operate` Mode) UI/UX Upgrade
+
+### Bugs, Leaks & Edge Cases Fixed
+1. **Window `blur` Listener Leak & 60Hz Re-Subscribe (`src/components/Floorplan2D.tsx`)**: Replaced the anonymous `blur` listener with a named `onWindowBlur` cleanup handler and moved `zoom`/`pan`/`interaction` into refs so global pointer listeners attach once per drag/resize/pan gesture instead of churning on every pointer move.
+2. **Stuck WASD/Arrow Keys on Blur (`src/components/Viewport3D.tsx`)**: Added a cleaned-up `window` `blur` listener and cleared `pressedKeysRef` when exiting `Crew Eye` first-person mode.
+3. **Unchecked `ZONE_CATALOG[z.type]` Lookups & Legacy Snapshot Crashes (`src/engine/hullMath.ts`, `src/store/habitatStore.ts`)**: Added `sanitizeZoneNode` to reject unknown legacy `ZoneType`s and invalid rotations from `localStorage`, plus defensive fallback lookups across `Floorplan2D` and `Viewport3D`.
+4. **Module Overlap on Deck Reduction (`src/engine/hullMath.ts`, `src/store/habitatStore.ts`)**: Implemented `resolveDeckAndHullCollisions` on `updateHull` when deck count decreases or hull bounds shrink.
+5. **Stale Selection & Locked Zone Support (`src/store/habitatStore.ts`)**: Pruned stale `selectedZoneId` / `highlightedZoneIds` on `undo()`, `redo()`, and `revertOptimization()`, and added `toggleZoneLock` (`Pin`) and `duplicateZone`.
+6. **Compare Egress & Multi-Deck Blind Spots (`src/components/CompareView.tsx`)**: Added explicit `✓ UNBLOCKED` / `✗ BLOCKED` delta indicators and per-card `D1 / D2 / D3` multi-deck selectors.
+7. **Single-Point Sparkline Division Edge Case (`src/components/SolarStormView.tsx`)**: Guarded `LogSparkline` against `series.length <= 1` and added interactive pointer-hover flux inspection.
+
+### Impeccable Operate-Mode UI/UX Upgrades (`DESIGN.md`, `src/index.css`, Components)
+- Authored [DESIGN.md](DESIGN.md) with OKLCH aerospace slate tokens, WCAG AA contrast floors, themed browser surfaces (`::selection`, `caret-color`, `:focus-visible`, custom `.cad-slider`), and `@media (prefers-reduced-motion: reduce)`.
+- Removed nested card clutter across rails via hairline `border-b` and `divide-x` strips; docked 2D/3D CAD toolbars and the contextual module bar outside canvases so `0m..14m` rulers and 3D hulls remain completely unobstructed.
+- Introduced the interactive **6-Subsystem Compliance Matrix** (`Volume`, `Acoustics`, `Bio-Sep`, `Egress A*`, `Airflow`, `Shielding`) and severity filter tabs (`All | Issues | Pass`) in `EngineeringInspector.tsx`.
+
+### Verification Gates (Pass 2)
+- `npx tsc --noEmit`: `0` errors.
+- `npx vitest run`: `14/14` tests passed (`engines.test.ts` + `appWorkflow.test.ts`, `561ms`).
+- `npm run build`: `0` errors, `0` chunk warnings (`dist/assets/index-C4H7qf97.js` `367.22 kB`, `dist/assets/three-Bz-ZpM0e.js` `499.40 kB`).
+- `impeccable detect --json src`: `[]` (`0` mechanical findings).
+- `node scripts/e2eVerify.mjs`: Passed at `1440×900`, `1280×720`, and `390×844` (`Console Errors: 0`, `Page Errors: 0`, `hasUnblocked: true`).

@@ -1,13 +1,78 @@
 @import "tailwindcss";
 
+:root {
+  color-scheme: dark;
+  --surface-canvas: oklch(0.145 0.022 255);
+  --surface-panel: oklch(0.175 0.024 255);
+  --surface-elevated: oklch(0.21 0.026 255);
+  --surface-hover: oklch(0.25 0.028 255);
+  --border-subtle: oklch(0.275 0.024 255);
+  --border-strong: oklch(0.36 0.032 255);
+  --text-primary: oklch(0.96 0.008 250);
+  --text-secondary: oklch(0.81 0.018 252);
+  --text-muted: oklch(0.69 0.02 252);
+  --accent-primary: oklch(0.76 0.14 212);
+  --accent-primary-dim: oklch(0.76 0.14 212 / 0.16);
+}
+
 @layer base {
-  :root {
-    color-scheme: dark;
+  html,
+  body {
+    background-color: var(--surface-canvas);
+    color: var(--text-primary);
+    caret-color: var(--accent-primary);
+  }
+
+  ::selection {
+    background-color: oklch(0.76 0.14 212 / 0.32);
+    color: oklch(0.98 0.01 220);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+  }
+
+  /* Precision aerospace range sliders */
+  input[type="range"].cad-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--surface-elevated);
+    border: 1px solid var(--border-subtle);
+    cursor: pointer;
+  }
+
+  input[type="range"].cad-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+    border: 2px solid var(--surface-canvas);
+    box-shadow: 0 1px 3px oklch(0 0 0 / 0.45);
+    transition: transform 140ms ease-out;
+  }
+
+  input[type="range"].cad-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.12);
+  }
+
+  input[type="range"].cad-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+    border: 2px solid var(--surface-canvas);
+    box-shadow: 0 1px 3px oklch(0 0 0 / 0.45);
   }
 
   * {
     scrollbar-width: thin;
-    scrollbar-color: #1e293b #090d16;
+    scrollbar-color: var(--border-strong) var(--surface-canvas);
   }
 
   *::-webkit-scrollbar {
@@ -16,22 +81,30 @@
   }
 
   *::-webkit-scrollbar-track {
-    background: #090d16;
+    background: var(--surface-canvas);
   }
 
   *::-webkit-scrollbar-thumb {
-    background: #1e293b;
+    background: var(--border-strong);
     border-radius: 3px;
   }
 
   *::-webkit-scrollbar-thumb:hover {
-    background: #334155;
+    background: oklch(0.45 0.03 255);
   }
 }
 
 .font-mono-telemetry {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-variant-numeric: tabular-nums;
+}
+
+.text-balance {
+  text-wrap: balance;
+}
+
+.text-pretty {
+  text-wrap: pretty;
 }
 
 @keyframes dash-flow {
@@ -42,4 +115,17 @@
 
 .animate-egress-flow {
   animation: dash-flow 1.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-egress-flow {
+    animation: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 120ms !important;
+  }
 }
