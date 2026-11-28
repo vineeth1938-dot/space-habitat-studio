@@ -1,78 +1,77 @@
-import React, { useEffect } from 'react';
-import { GRID_STEP_M } from './engine/constants';
+import React, { useEffect, useState } from 'react';
+import { Box, ShieldAlert, Sparkles } from 'lucide-react';
 import { TopBar } from './components/TopBar';
-import { LeftRail } from './components/LeftRail';
-import { BlueprintCanvas } from './components/BlueprintCanvas';
-import { RightRail } from './components/RightRail';
-import { CompareDrawer } from './components/CompareDrawer';
-import { MobileBottomNav } from './components/MobileBottomNav';
+import { LeftSidebar } from './components/LeftSidebar';
+import { Floorplan2D } from './components/Floorplan2D';
+import { Viewport3D } from './components/Viewport3D';
+import { EngineeringInspector } from './components/EngineeringInspector';
+import { CompareView } from './components/CompareView';
+import { SolarStormView } from './components/SolarStormView';
+import { JudgeTourBanner } from './components/JudgeTourBanner';
+import { AuditReportModal } from './components/AuditReportModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { useCadStore } from './store/useCadStore';
+import { useHabitatStore } from './store/habitatStore';
+
+type ViewportSplit = 'split' | '2d' | '3d';
 
 export const App: React.FC = () => {
   const {
-    theme,
-    mobilePanel,
-    tabletDrawerOpen,
-    statusNotice,
-    setTabletDrawerOpen,
-    clearNotice,
-  } = useCadStore();
+    activeView,
+    mobileDrawer,
+    report,
+    setMobileDrawer,
+    runAutoOptimize,
+    fetchLiveWeather,
+  } = useHabitatStore();
+  const [splitMode, setSplitMode] = useState<ViewportSplit>('split');
 
-  // Auto-dismiss status toast after 3.2 seconds
+  // Initial live NOAA GOES fetch on mount (with clean offline fallback)
   useEffect(() => {
-    if (!statusNotice) return;
-    const timer = setTimeout(() => {
-      clearNotice();
-    }, 3200);
-    return () => clearTimeout(timer);
-  }, [statusNotice, clearNotice]);
+    void fetchLiveWeather();
+  }, [fetchLiveWeather]);
 
+  // Global CAD keyboard shortcuts: Undo, Redo, Rotate (R), Delete/Backspace, Escape
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
+      const target = e.target as HTMLElement | null;
       if (
-        el &&
-        (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT')
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT')
       ) {
         return;
       }
 
-      const state = useCadStore.getState();
-      if (state.compareOpen) return;
+      const state = useHabitatStore.getState();
+      if (e.key === 'Escape') {
+        if (state.auditModalOpen) {
+          state.setAuditModalOpen(false);
+        } else if (state.mobileDrawer !== 'none') {
+          state.setMobileDrawer('none');
+        } else if (state.selectedZoneId || state.highlightedZoneIds.length > 0) {
+          state.selectZone(null);
+        }
+        return;
+      }
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         if (e.shiftKey) state.redo();
         else state.undo();
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
         e.preventDefault();
         state.redo();
-        return;
-      }
-
-      if (!state.selectedModuleId) return;
-
-      if (e.key === 'ArrowLeft') {
+      } else if (e.key.toLowerCase() === 'r' && state.selectedZoneId && state.activeView === 'studio') {
         e.preventDefault();
-        state.nudgeSelected(-GRID_STEP_M, 0);
-      } else if (e.key === 'ArrowRight') {
+        state.rotateZone(state.selectedZoneId);
+      } else if (
+        (e.key === 'Delete' || e.key === 'Backspace') &&
+        state.selectedZoneId &&
+        state.activeView === 'studio'
+      ) {
         e.preventDefault();
-        state.nudgeSelected(GRID_STEP_M, 0);
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        state.nudgeSelected(0, -GRID_STEP_M);
-      } else if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        state.nudgeSelected(0, GRID_STEP_M);
-      } else if (e.key.toLowerCase() === 'r') {
-        e.preventDefault();
-        state.rotateModule(state.selectedModuleId);
-      } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        e.preventDefault();
-        state.deleteModule(state.selectedModuleId);
+        state.deleteZone(state.selectedZoneId);
       }
     };
 
@@ -81,66 +80,148 @@ export const App: React.FC = () => {
   }, []);
 
   return (
-    <ErrorBoundary>
-      <div
-        className={`h-[100dvh] w-screen flex flex-col overflow-hidden ${
-          theme === 'dark' ? 'theme-dark' : ''
-        }`}
-        style={{ backgroundColor: 'var(--bg-canvas)', color: 'var(--fg-primary)' }}
-      >
+    <ErrorBoundary panelName="Space Habitat Studio">
+      <div className="h-dvh w-screen flex flex-col bg-[#090D16] text-slate-100 overflow-hidden">
         <TopBar />
+        <JudgeTourBanner />
 
-        {/* Subtle Non-Blocking Desktop/Tablet Status Toast */}
-        {statusNotice && mobilePanel !== 'build' && (
-          <div
-            role="status"
-            aria-live="polite"
-            className="fixed bottom-16 md:bottom-5 left-1/2 -translate-x-1/2 z-30 px-3.5 py-2 rounded-full border text-xs font-medium shadow-lg pointer-events-none max-w-[90vw] truncate"
-            style={{
-              backgroundColor: 'var(--bg-panel)',
-              borderColor: 'var(--border-strong)',
-              color: 'var(--fg-primary)',
-            }}
-          >
-            {statusNotice}
+        {activeView === 'studio' && (
+          <div className="flex-1 flex min-h-0 overflow-hidden relative">
+            {/* Desktop Left Rail (>= 1024px) */}
+            <div className="hidden lg:flex h-full">
+              <ErrorBoundary panelName="Zone & Hull Configurator">
+                <LeftSidebar />
+              </ErrorBoundary>
+            </div>
+
+            {/* Mobile Slide-Over Drawers (< 1024px) */}
+            {mobileDrawer !== 'none' && (
+              <div
+                className="fixed inset-0 z-40 bg-black/70 lg:hidden flex"
+                onClick={() => setMobileDrawer('none')}
+              >
+                <div
+                  className={`h-full ${mobileDrawer === 'right' ? 'ml-auto' : ''}`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {mobileDrawer === 'left' ? (
+                    <LeftSidebar isMobileDrawer />
+                  ) : (
+                    <EngineeringInspector isMobileDrawer />
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Synchronized 2D + 3D Center Workspace */}
+            <main className="flex-1 flex flex-col min-w-0 min-h-0 relative bg-[#090D16]">
+              {/* Viewport Layout Switcher */}
+              <div className="min-h-8 py-1 shrink-0 bg-[#0D1320]/90 border-b border-slate-800/80 px-2 flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
+                <div className="flex items-center gap-1 min-w-0">
+                  {/* Mobile Drawer Triggers */}
+                  <button
+                    type="button"
+                    onClick={() => setMobileDrawer('left')}
+                    className="lg:hidden inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 text-cyan-300 border border-slate-700 text-[10px] font-medium cursor-pointer shrink-0"
+                  >
+                    <Box className="w-3 h-3" />
+                    <span>Modules</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={runAutoOptimize}
+                    className="lg:hidden inline-flex items-center gap-1 px-2 py-0.5 rounded bg-cyan-600/25 text-cyan-200 border border-cyan-500/40 text-[10px] font-medium cursor-pointer shrink-0"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    <span>Optimize</span>
+                  </button>
+                  <span className="hidden lg:inline text-slate-400 font-mono-telemetry truncate">
+                    SYNCHRONIZED CAD • DRAG / RESIZE / [R] ROTATE / [DEL] REMOVE / [ESC] CLEAR
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1 shrink-0">
+                  <div className="flex items-center bg-[#090D16] border border-slate-800 rounded p-0.5 gap-0.5">
+                    {(
+                      [
+                        { id: 'split', label: 'Split 2D+3D', shortLabel: 'Split' },
+                        { id: '2d', label: '2D Only', shortLabel: '2D' },
+                        { id: '3d', label: '3D Only', shortLabel: '3D' },
+                      ] as const
+                    ).map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setSplitMode(m.id)}
+                        className={`px-1.5 sm:px-2 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
+                          splitMode === m.id
+                            ? 'bg-cyan-500/20 text-cyan-300'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <span className="hidden sm:inline">{m.label}</span>
+                        <span className="sm:hidden">{m.shortLabel}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setMobileDrawer('right')}
+                    className="lg:hidden inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 text-amber-300 border border-slate-700 text-[10px] font-mono-telemetry cursor-pointer"
+                  >
+                    <ShieldAlert className="w-3 h-3" />
+                    {report.criticalCount}C/{report.warningCount}W
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 flex flex-col min-h-0">
+                {splitMode !== '3d' && (
+                  <div
+                    className={`${
+                      splitMode === 'split' ? 'h-[53%] border-b border-slate-800' : 'h-full'
+                    } w-full min-h-0`}
+                  >
+                    <ErrorBoundary panelName="2D Blueprint Viewport">
+                      <Floorplan2D />
+                    </ErrorBoundary>
+                  </div>
+                )}
+                {splitMode !== '2d' && (
+                  <div
+                    className={`${splitMode === 'split' ? 'h-[47%]' : 'h-full'} w-full min-h-0`}
+                  >
+                    <ErrorBoundary panelName="3D WebGL Viewport">
+                      <Viewport3D />
+                    </ErrorBoundary>
+                  </div>
+                )}
+              </div>
+            </main>
+
+            {/* Desktop Right Inspector Rail (>= 1024px) */}
+            <div className="hidden lg:flex h-full">
+              <ErrorBoundary panelName="Engineering Inspector">
+                <EngineeringInspector />
+              </ErrorBoundary>
+            </div>
           </div>
         )}
 
-        {/* Desktop & Tablet Workspace (>= 768px) */}
-        <div className="hidden md:flex flex-1 min-h-0 overflow-hidden relative">
-          {/* Persistent Left Rail on Large Laptops/Desktops (>= 1152px) */}
-          <div className="hidden min-[1152px]:flex h-full shrink-0">
-            <LeftRail variant="desktop" />
-          </div>
+        {activeView === 'compare' && (
+          <ErrorBoundary panelName="Compare Mode">
+            <CompareView />
+          </ErrorBoundary>
+        )}
 
-          {/* Slide-Over Left Drawer on iPads / Tablets (768px - 1151px) */}
-          {tabletDrawerOpen && (
-            <div
-              className="min-[1152px]:hidden fixed inset-0 z-40 flex"
-              style={{ backgroundColor: 'rgba(2, 6, 23, 0.55)' }}
-              onClick={(e) => {
-                if (e.target === e.currentTarget) setTabletDrawerOpen(false);
-              }}
-            >
-              <div className="h-full shadow-xl">
-                <LeftRail variant="drawer" />
-              </div>
-            </div>
-          )}
+        {activeView === 'weather' && (
+          <ErrorBoundary panelName="Solar-Flare Stress Test">
+            <SolarStormView />
+          </ErrorBoundary>
+        )}
 
-          <BlueprintCanvas />
-          <RightRail variant="desktop" />
-        </div>
-
-        {/* Phone Single-Pane Thumb-First Workspace (< 768px) */}
-        <div className="flex md:hidden flex-1 min-h-0 overflow-hidden">
-          {mobilePanel === 'canvas' && <BlueprintCanvas />}
-          {mobilePanel === 'build' && <LeftRail variant="mobile" />}
-          {mobilePanel === 'audit' && <RightRail variant="mobile" />}
-        </div>
-
-        <MobileBottomNav />
-        <CompareDrawer />
+        <AuditReportModal />
       </div>
     </ErrorBoundary>
   );

@@ -1,126 +1,45 @@
 @import "tailwindcss";
 
-:root {
-  --bg-canvas: #f1f5f9;
-  --bg-panel: #ffffff;
-  --bg-subtle: #e2e8f0;
-  --bg-elevated: #f8fafc;
-  --fg-primary: #0f172a;
-  --fg-secondary: #334155;
-  --fg-muted: #475569;
-  --border-hairline: #cbd5e1;
-  --border-strong: #0284c7;
-  --grid-minor: #e2e8f0;
-  --grid-major: #cbd5e1;
-  --accent-primary: #0284c7;
-  --accent-primary-hover: #0369a1;
-  --accent-fg: #ffffff;
-  --focus-ring: #0284c7;
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #1e293b #090d16;
+  }
+
+  *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: #090d16;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: #1e293b;
+    border-radius: 3px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: #334155;
+  }
 }
 
-.theme-dark {
-  --bg-canvas: #0b0f19;
-  --bg-panel: #111827;
-  --bg-subtle: #1e293b;
-  --bg-elevated: #172033;
-  --fg-primary: #f8fafc;
-  --fg-secondary: #cbd5e1;
-  --fg-muted: #94a3b8;
-  --border-hairline: #1e293b;
-  --border-strong: #38bdf8;
-  --grid-minor: #131c2e;
-  --grid-major: #1e293b;
-  --accent-primary: #0ea5e9;
-  --accent-primary-hover: #38bdf8;
-  --accent-fg: #082f49;
-  --focus-ring: #38bdf8;
-}
-
-* {
-  box-sizing: border-box;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-hairline) var(--bg-panel);
-  -webkit-tap-highlight-color: transparent;
-}
-
-html,
-body {
-  margin: 0;
-  padding: 0;
-  overscroll-behavior: none;
-}
-
-/* Eliminate 300ms mobile tap delay & scroll-stealing on all interactive controls */
-button,
-select,
-input,
-a,
-[role="button"] {
-  touch-action: manipulation;
-}
-
-::selection {
-  background-color: var(--focus-ring);
-  color: #ffffff;
-}
-
-input,
-textarea,
-select {
-  caret-color: var(--focus-ring);
-}
-
-:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 1px;
-}
-
-*::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-*::-webkit-scrollbar-track {
-  background: var(--bg-panel);
-}
-
-*::-webkit-scrollbar-thumb {
-  background: var(--border-hairline);
-  border-radius: 3px;
-}
-
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
-.font-mono-cad {
-  font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+.font-mono-telemetry {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-variant-numeric: tabular-nums;
 }
 
-.zone-transition {
-  transition: transform 340ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.safe-top {
-  padding-top: env(safe-area-inset-top, 0px);
-}
-
-.safe-bottom {
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-}
-
-.safe-x {
-  padding-left: env(safe-area-inset-left, 0px);
-  padding-right: env(safe-area-inset-right, 0px);
-}
-
-@media (pointer: coarse) {
-  input[type="range"] {
-    height: 28px;
+@keyframes dash-flow {
+  to {
+    stroke-dashoffset: -24;
   }
+}
+
+.animate-egress-flow {
+  animation: dash-flow 1.2s linear infinite;
 }

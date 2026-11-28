@@ -1,59 +1,61 @@
 import React from 'react';
-import { useCadStore } from '../store/useCadStore';
+import { AlertTriangle, RotateCcw } from 'lucide-react';
+
+interface ErrorBoundaryProps {
+  panelName: string;
+  children: React.ReactNode;
+  onRecover?: () => void;
+}
 
 interface ErrorBoundaryState {
   hasError: boolean;
-  errorMessage: string;
+  message: string;
 }
 
-export class ErrorBoundary extends React.Component<
-  { children: React.ReactNode },
-  ErrorBoundaryState
-> {
-  constructor(props: { children: React.ReactNode }) {
+export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
     super(props);
-    this.state = { hasError: false, errorMessage: '' };
+    this.state = { hasError: false, message: '' };
   }
 
   static getDerivedStateFromError(error: unknown): ErrorBoundaryState {
     return {
       hasError: true,
-      errorMessage: error instanceof Error ? error.message : 'Unexpected CAD runtime exception',
+      message: error instanceof Error ? error.message : 'Unexpected subsystem fault',
     };
   }
 
-  private handleRecover = () => {
-    try {
-      window.localStorage.removeItem('bmsit_starforge_sw4_snapshots_v1');
-      useCadStore.getState().resetWorkspace();
-    } catch {
-      // Ignore recovery cleanup errors
-    }
-    this.setState({ hasError: false, errorMessage: '' });
+  componentDidCatch(error: unknown, info: React.ErrorInfo): void {
+    console.warn(`[ErrorBoundary:${this.props.panelName}]`, error, info.componentStack);
+  }
+
+  private handleReset = () => {
+    this.setState({ hasError: false, message: '' });
+    this.props.onRecover?.();
   };
 
-  override render() {
+  render() {
     if (this.state.hasError) {
       return (
-        <div className="h-[100dvh] w-screen bg-[#09090b] text-[#f4f4f6] flex items-center justify-center p-6 font-mono-cad">
-          <div className="max-w-md w-full border border-[#27272a] bg-[#101013] p-6 space-y-4">
-            <h1 className="text-sm font-bold uppercase tracking-wider text-rose-400">
-              CAD Workspace Exception Intercepted
-            </h1>
-            <p className="text-xs text-[#d4d4d8] leading-relaxed">
-              An invalid layout state or corrupted local cache was caught before it could crash the studio.
-            </p>
-            <div className="text-xs text-[#a1a1aa] border border-[#27272a] bg-[#09090b] p-3 break-words">
-              {this.state.errorMessage}
-            </div>
-            <button
-              type="button"
-              onClick={this.handleRecover}
-              className="w-full min-h-[44px] py-2 px-4 border border-[#f4f4f6] bg-[#f4f4f6] text-[#09090b] text-xs font-bold uppercase tracking-wider cursor-pointer"
-            >
-              Reset Workspace &amp; Recover State
-            </button>
+        <div
+          role="alert"
+          className="w-full h-full min-h-[160px] bg-[#090D16] border border-rose-500/35 rounded-lg p-5 flex flex-col items-center justify-center text-center gap-2.5"
+        >
+          <AlertTriangle className="w-7 h-7 text-amber-400" />
+          <div className="text-xs font-semibold text-slate-100">
+            {this.props.panelName} Isolated Fault Recovery
           </div>
+          <p className="text-[11px] text-slate-400 max-w-sm font-mono-telemetry">
+            {this.state.message || 'Subsystem recovered safely without losing mission state.'}
+          </p>
+          <button
+            type="button"
+            onClick={this.handleReset}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 text-xs font-medium cursor-pointer transition-colors"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            Reinitialize {this.props.panelName}
+          </button>
         </div>
       );
     }

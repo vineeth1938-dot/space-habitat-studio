@@ -1,259 +1,228 @@
-import React from 'react';
-import { Compass, Flame, Moon, Redo2, SlidersHorizontal, Sun, Undo2 } from 'lucide-react';
-import { AGENCY_STANDARDS_META } from '../engine/constants';
-import { HABITAT_PRESETS } from '../engine/presets';
-import { useCadStore } from '../store/useCadStore';
-import { AgencyStandard } from '../types/habitat';
+import React, { useState } from 'react';
+import {
+  Camera,
+  Check,
+  Columns2,
+  Compass,
+  FileCheck2,
+  Flame,
+  Layers,
+  PlayCircle,
+  Redo2,
+  Undo2,
+} from 'lucide-react';
+import { HABITAT_PRESETS } from '../data/presets';
+import { ActiveView, useHabitatStore } from '../store/habitatStore';
 
 export const TopBar: React.FC = () => {
   const {
-    theme,
     activePresetId,
-    mission,
-    evaluation,
+    activeView,
+    report,
     past,
     future,
-    tabletDrawerOpen,
-    toggleTheme,
+    snapshots,
+    stormStress,
+    judgeTourActive,
     loadPreset,
-    setStandard,
-    toggleSolarFlare,
+    setActiveView,
+    setJudgeTour,
+    setAuditModalOpen,
     undo,
     redo,
-    setMobilePanel,
-    setTabletDrawerOpen,
-  } = useCadStore();
+    saveSnapshot,
+  } = useHabitatStore();
 
-  const standards: AgencyStandard[] = ['NASA', 'ISRO', 'SPACEX', 'UNIFIED'];
-  const failCount = evaluation.issues.filter((i) => i.severity === 'FAIL').length;
+  const [savedToast, setSavedToast] = useState(false);
+
+  const handleSaveSnapshot = () => {
+    saveSnapshot();
+    setSavedToast(true);
+    setTimeout(() => setSavedToast(false), 1800);
+  };
+
   const scoreColor =
-    failCount === 0 && evaluation.scores.overall >= 82
-      ? '#10b981'
-      : failCount === 0 || evaluation.scores.overall >= 60
-        ? '#f59e0b'
-        : '#ef4444';
+    report.score >= 85
+      ? 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10'
+      : report.score >= 60
+        ? 'text-amber-300 border-amber-500/40 bg-amber-500/10'
+        : 'text-rose-300 border-rose-500/40 bg-rose-500/10';
+
+  const navTabs: Array<{ id: ActiveView; label: string; shortLabel: string; icon: React.ReactNode; badge?: string }> = [
+    {
+      id: 'studio',
+      label: 'Studio 2D/3D',
+      shortLabel: 'Studio',
+      icon: <Layers className="w-3.5 h-3.5" />,
+    },
+    {
+      id: 'compare',
+      label: 'Compare',
+      shortLabel: 'Compare',
+      icon: <Columns2 className="w-3.5 h-3.5" />,
+      badge: `${snapshots.length}`,
+    },
+    {
+      id: 'weather',
+      label: 'Solar Storm',
+      shortLabel: 'Storm',
+      icon: <Flame className="w-3.5 h-3.5" />,
+      badge: stormStress.verdict,
+    },
+  ];
 
   return (
-    <header
-      className="shrink-0 border-b safe-top safe-x"
-      style={{
-        backgroundColor: 'var(--bg-panel)',
-        borderColor: 'var(--border-hairline)',
-        color: 'var(--fg-primary)',
-      }}
-    >
-      {/* Primary Row */}
-      <div className="min-h-[50px] md:h-12 px-3 flex items-center justify-between gap-2">
-        {/* Left: iPad Drawer Trigger + Brand + Desktop Preset Loader */}
-        <div className="flex items-center gap-2.5 min-w-0">
-          <button
-            type="button"
-            data-testid="tablet-drawer-btn"
-            onClick={() => setTabletDrawerOpen(!tabletDrawerOpen)}
-            aria-label="Toggle Mission and Zone Palette"
-            className="hidden md:flex min-[1152px]:hidden items-center gap-1.5 px-3 h-9 rounded-md border text-xs font-semibold cursor-pointer shrink-0"
-            style={{
-              borderColor: tabletDrawerOpen ? 'var(--border-strong)' : 'var(--border-hairline)',
-              backgroundColor: tabletDrawerOpen ? 'var(--accent-primary)' : 'var(--bg-subtle)',
-              color: tabletDrawerOpen ? '#ffffff' : 'var(--fg-primary)',
-            }}
-          >
-            <SlidersHorizontal className="w-3.5 h-3.5" />
-            <span>Mission &amp; Zones</span>
-          </button>
-
-          <div className="flex items-center gap-2 min-w-0 shrink-0">
-            <Compass
-              className="w-4 h-4 shrink-0"
-              style={{ color: 'var(--accent-primary)' }}
-            />
-            <h1 className="text-xs sm:text-sm font-bold tracking-tight truncate">
-              HABITAT // SW-4
-            </h1>
+    <header className="min-h-12 shrink-0 bg-[#0D1320] border-b border-slate-800/90 px-2.5 lg:px-3 py-1.5 flex flex-wrap lg:flex-nowrap items-center justify-between gap-1.5 xl:gap-2 select-none">
+      {/* Brand + Historical Heritage Preset Switcher */}
+      <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="w-7 h-7 rounded-md bg-cyan-500/15 border border-cyan-500/40 flex items-center justify-center">
+            <Compass className="w-4 h-4 text-cyan-400" />
           </div>
-
-          {/* Tablet & Desktop Preset Selector */}
-          <div className="hidden md:flex items-center gap-2 min-w-0">
-            <div
-              className="h-5 w-px shrink-0"
-              style={{ backgroundColor: 'var(--border-hairline)' }}
-            />
-            <select
-              aria-label="Mission Preset"
-              data-testid="preset-select"
-              value={activePresetId}
-              onChange={(e) => loadPreset(e.target.value)}
-              className="text-xs px-2.5 h-8 rounded-md border outline-none cursor-pointer max-w-[210px] xl:max-w-[250px] truncate font-medium"
-              style={{
-                backgroundColor: 'var(--bg-subtle)',
-                borderColor: 'var(--border-hairline)',
-                color: 'var(--fg-primary)',
-              }}
-            >
-              {HABITAT_PRESETS.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
+          <div className="leading-tight hidden sm:block">
+            <div className="text-xs font-bold tracking-wide text-slate-100 uppercase">
+              Space Habitat Studio
+            </div>
+            <div className="text-[9px] font-mono-telemetry text-cyan-400/85 hidden xl:block">
+              NASA-STD-3001 • HRP CAD
+            </div>
           </div>
         </div>
 
-        {/* Center: Agency Standard Segmented Bar (Tablet & Desktop) */}
-        <div
-          className="hidden md:flex rounded-md overflow-hidden border shrink-0"
-          style={{ borderColor: 'var(--border-hairline)' }}
-          role="group"
-          aria-label="Agency Standard Selector"
-        >
-          {standards.map((std) => {
-            const active = mission.standard === std;
-            return (
-              <button
-                type="button"
-                key={std}
-                data-testid={`std-${std}`}
-                onClick={() => setStandard(std)}
-                title={AGENCY_STANDARDS_META[std].summary}
-                className="px-2.5 xl:px-3 h-8 text-xs font-semibold border-r last:border-r-0 cursor-pointer transition-colors"
-                style={{
-                  borderColor: 'var(--border-hairline)',
-                  backgroundColor: active ? 'var(--accent-primary)' : 'transparent',
-                  color: active ? '#ffffff' : 'var(--fg-secondary)',
-                }}
-              >
-                <span className="hidden xl:inline">{AGENCY_STANDARDS_META[std].label}</span>
-                <span className="xl:hidden">{AGENCY_STANDARDS_META[std].short}</span>
-              </button>
-            );
-          })}
-        </div>
+        <div className="h-5 w-px bg-slate-800 hidden md:block" />
 
-        {/* Right: Mobile Score Pill + Solar Flare + Undo/Redo + Theme */}
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            type="button"
-            onClick={() => setMobilePanel('audit')}
-            className="md:hidden px-2.5 h-10 rounded-md border font-mono-cad text-xs font-bold flex items-center gap-1 cursor-pointer"
-            style={{
-              borderColor: scoreColor,
-              color: scoreColor,
-              backgroundColor: 'var(--bg-elevated)',
-            }}
-            aria-label={`Readiness score ${evaluation.scores.overall} out of 100`}
-          >
-            <span>{evaluation.scores.overall}</span>
-            <span className="text-[10px] opacity-85">/100</span>
-          </button>
-
-          <button
-            type="button"
-            data-testid="solar-flare-btn"
-            onClick={toggleSolarFlare}
-            title="Simulate X-Class Solar Particle Event (SPE) Storm-Shelter Check"
-            aria-pressed={mission.solarFlareSim}
-            className="flex items-center justify-center gap-1.5 px-2.5 h-10 md:h-8 min-w-[40px] rounded-md border text-xs font-semibold cursor-pointer transition-colors"
-            style={{
-              borderColor: mission.solarFlareSim ? '#ef4444' : 'var(--border-hairline)',
-              backgroundColor: mission.solarFlareSim ? 'rgba(239, 68, 68, 0.14)' : 'var(--bg-subtle)',
-              color: mission.solarFlareSim ? '#ef4444' : 'var(--fg-secondary)',
-            }}
-          >
-            <Flame className="w-4 h-4 md:w-3.5 md:h-3.5 shrink-0" />
-            <span className="hidden lg:inline">
-              {mission.solarFlareSim ? 'SOLAR FLARE: ACTIVE' : 'Solar Flare Test'}
-            </span>
-          </button>
-
-          <div
-            className="flex rounded-md overflow-hidden border"
-            style={{ borderColor: 'var(--border-hairline)', backgroundColor: 'var(--bg-subtle)' }}
-          >
-            <button
-              type="button"
-              data-testid="undo-btn"
-              onClick={undo}
-              disabled={past.length === 0}
-              aria-label="Undo"
-              title="Undo (Ctrl+Z)"
-              className="w-10 h-10 md:w-8 md:h-8 flex items-center justify-center border-r disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed"
-              style={{ borderColor: 'var(--border-hairline)', color: 'var(--fg-primary)' }}
-            >
-              <Undo2 className="w-4 h-4 md:w-3.5 md:h-3.5" />
-            </button>
-            <button
-              type="button"
-              data-testid="redo-btn"
-              onClick={redo}
-              disabled={future.length === 0}
-              aria-label="Redo"
-              title="Redo (Ctrl+Y)"
-              className="w-10 h-10 md:w-8 md:h-8 flex items-center justify-center disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed"
-              style={{ color: 'var(--fg-primary)' }}
-            >
-              <Redo2 className="w-4 h-4 md:w-3.5 md:h-3.5" />
-            </button>
-          </div>
-
-          <button
-            type="button"
-            data-testid="theme-toggle-btn"
-            onClick={toggleTheme}
-            aria-label="Toggle Light and Dark Theme"
-            className="flex items-center justify-center gap-1 px-2.5 h-10 md:h-8 min-w-[40px] rounded-md border text-xs font-medium cursor-pointer"
-            style={{
-              borderColor: 'var(--border-hairline)',
-              backgroundColor: 'var(--bg-subtle)',
-              color: 'var(--fg-primary)',
-            }}
-          >
-            {theme === 'dark' ? (
-              <Sun className="w-4 h-4 md:w-3.5 md:h-3.5" />
-            ) : (
-              <Moon className="w-4 h-4 md:w-3.5 md:h-3.5" />
-            )}
-            <span className="hidden xl:inline">{theme === 'dark' ? 'Light' : 'Dark'}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Phone Compact Second Row (< 768px): 16px Touch-Safe Selectors */}
-      <div className="md:hidden px-3 pb-2.5 grid grid-cols-2 gap-2">
+        {/* Preset Selector */}
         <select
-          aria-label="Mission Preset"
+          aria-label="Habitat Preset"
           value={activePresetId}
           onChange={(e) => loadPreset(e.target.value)}
-          className="w-full h-11 px-2.5 rounded-md border text-base outline-none truncate font-medium"
-          style={{
-            backgroundColor: 'var(--bg-subtle)',
-            borderColor: 'var(--border-hairline)',
-            color: 'var(--fg-primary)',
-          }}
+          className="bg-[#111827] hover:bg-slate-800/80 border border-slate-700/80 text-slate-100 text-xs rounded-md px-2 py-1 max-w-[170px] sm:max-w-[205px] xl:max-w-[255px] truncate outline-none focus:border-cyan-500 transition-colors cursor-pointer"
         >
           {HABITAT_PRESETS.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.label}
+              {p.name}
             </option>
           ))}
         </select>
+      </div>
 
-        <select
-          aria-label="Agency Engineering Standard"
-          value={mission.standard}
-          onChange={(e) => setStandard(e.target.value as AgencyStandard)}
-          className="w-full h-11 px-2.5 rounded-md border text-base outline-none truncate font-medium"
-          style={{
-            backgroundColor: 'var(--bg-subtle)',
-            borderColor: 'var(--border-hairline)',
-            color: 'var(--fg-primary)',
-          }}
+      {/* Center View Mode Tabs */}
+      <nav
+        aria-label="Workspace Views"
+        className="flex items-center bg-[#090D16] p-0.5 rounded-lg border border-slate-800/80 gap-0.5"
+      >
+        {navTabs.map((tab) => {
+          const active = activeView === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveView(tab.id)}
+              className={`flex items-center gap-1.5 px-2 xl:px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
+                active
+                  ? 'bg-cyan-500/15 text-cyan-200 border border-cyan-500/40'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent'
+              }`}
+            >
+              {tab.icon}
+              <span className="hidden md:inline">{tab.label}</span>
+              <span className="md:hidden">{tab.shortLabel}</span>
+              {tab.badge && (
+                <span
+                  className={`text-[9px] font-mono-telemetry px-1.5 py-0.2 rounded-full ${
+                    tab.badge === 'FAIL'
+                      ? 'bg-rose-500/20 text-rose-300'
+                      : tab.badge === 'MARGINAL'
+                        ? 'bg-amber-500/20 text-amber-300'
+                        : tab.badge === 'PASS'
+                          ? 'bg-emerald-500/20 text-emerald-300'
+                          : 'bg-slate-700/80 text-slate-300'
+                  }`}
+                >
+                  {tab.badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </nav>
+
+      {/* Right Actions: Demo Tour, Undo/Redo, Snapshot, Audit Export, Readiness Score */}
+      <div className="flex items-center gap-1.5 whitespace-nowrap">
+        <button
+          type="button"
+          onClick={() => setJudgeTour(!judgeTourActive, 0)}
+          className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border transition-colors cursor-pointer ${
+            judgeTourActive
+              ? 'bg-cyan-500/20 text-cyan-200 border-cyan-400/60'
+              : 'bg-[#111827] hover:bg-slate-800 text-cyan-300 border-slate-700/80'
+          }`}
+          title="Launch 4-Step Judge Demo Walkthrough"
         >
-          {standards.map((std) => (
-            <option key={std} value={std}>
-              {AGENCY_STANDARDS_META[std].label}
-            </option>
-          ))}
-        </select>
+          <PlayCircle className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">Demo Tour</span>
+        </button>
+
+        <div className="flex items-center bg-[#111827] border border-slate-800 rounded-md overflow-hidden">
+          <button
+            type="button"
+            onClick={undo}
+            disabled={past.length === 0}
+            title="Undo (Ctrl+Z)"
+            aria-label="Undo"
+            className="p-1.5 text-slate-300 hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+          >
+            <Undo2 className="w-3.5 h-3.5" />
+          </button>
+          <div className="w-px h-4 bg-slate-800" />
+          <button
+            type="button"
+            onClick={redo}
+            disabled={future.length === 0}
+            title="Redo (Ctrl+Y)"
+            aria-label="Redo"
+            className="p-1.5 text-slate-300 hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+          >
+            <Redo2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleSaveSnapshot}
+          title="Save Layout Snapshot"
+          className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-[#111827] hover:bg-slate-800 border border-slate-700/80 text-slate-200 transition-colors cursor-pointer"
+        >
+          {savedToast ? (
+            <>
+              <Check className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="text-emerald-300 hidden xl:inline">Saved</span>
+            </>
+          ) : (
+            <>
+              <Camera className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="hidden xl:inline">Snapshot</span>
+            </>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setAuditModalOpen(true)}
+          title="Export NASA-STD-3001 Verification Report (JSON / Printable PDF)"
+          className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-[#111827] hover:bg-slate-800 border border-slate-700/80 text-slate-200 transition-colors cursor-pointer"
+        >
+          <FileCheck2 className="w-3.5 h-3.5 text-emerald-400" />
+          <span className="hidden xl:inline">Export Audit</span>
+          <span className="hidden lg:inline xl:hidden">Audit</span>
+        </button>
+
+        <div
+          className={`flex items-center gap-1.5 px-2 py-1 rounded-md border font-mono-telemetry text-xs font-bold ${scoreColor}`}
+        >
+          <span className="text-[9px] font-normal opacity-80 hidden sm:inline">SCORE</span>
+          <span>{report.score}/100</span>
+        </div>
       </div>
     </header>
   );
