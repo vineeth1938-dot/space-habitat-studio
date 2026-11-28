@@ -1,10 +1,14 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
+  Copy,
+  Lock,
   Maximize2,
   RotateCw,
   Route,
   Trash2,
+  Unlock,
+  Wind,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
@@ -12,6 +16,40 @@ import { EvaluationReport, MissionConfig, ZoneNode, ZoneType } from '../types/ha
 import { ZONE_CATALOG } from '../data/zoneCatalog';
 import { getHullBounds, getHullCornerRadius, snapToGrid } from '../engine/hullMath';
 import { useHabitatStore } from '../store/habitatStore';
+import type { CrewEyePoseEvent } from './Viewport3D';
+
+function formatCadModuleLabel(z: ZoneNode, wPx: number, shortLabel: string): string {
+  if (wPx < 66) return shortLabel;
+  const raw = z.label.replace(/\s*\(\d+\s*Bunks?\)/i, '').trim();
+
+  if (wPx >= 136 && raw.length <= 22) return raw;
+
+  switch (z.type) {
+    case 'crew_quarters': {
+      const match = raw.match(/Crew Quarters\s*([A-Z0-9#]+)?/i);
+      const suffix = match?.[1] ? ` ${match[1]}` : '';
+      return wPx < 96 ? `Sleep${suffix}` : `Crew Quarters${suffix}`;
+    }
+    case 'hygiene':
+      return wPx < 92 ? 'Hygiene' : 'Hygiene (UWMS)';
+    case 'storm_shelter':
+      return wPx < 96 ? 'Shelter' : 'Storm Shelter';
+    case 'airlock':
+      return wPx < 92 ? 'Airlock' : 'Airlock Hatch';
+    case 'eclss':
+      return wPx < 92 ? 'ECLSS' : 'ECLSS & Water';
+    case 'medical':
+      return wPx < 96 ? 'Med Lab' : 'Medical & Lab';
+    case 'stowage':
+      return wPx < 92 ? 'Stowage' : 'Stowage & H₂O';
+    case 'galley':
+      return wPx < 105 ? 'Galley / Mess' : 'Galley & Wardroom';
+    case 'exercise':
+      return wPx < 100 ? 'Exercise' : 'Exercise & ARED';
+    default:
+      return raw.length > 16 ? shortLabel : raw;
+  }
+}
 
 interface Floorplan2DProps {
   missionOverride?: MissionConfig;
@@ -21,6 +59,37 @@ interface Floorplan2DProps {
   readonly?: boolean;
   compact?: boolean;
 }
+
+type InteractionState =
+  | null
+  | {
+      mode: 'pan';
+      pointerId: number;
+      startX: number;
+      startY: number;
+      origPanX: number;
+      origPanY: number;
+    }
+  | {
+      mode: 'move';
+      pointerId: number;
+      zoneId: string;
+      startClientX: number;
+      startClientY: number;
+      offsetX: number;
+      offsetY: number;
+      recorded: boolean;
+    }
+  | {
+      mode: 'resize';
+      pointerId: number;
+      zoneId: string;
+      startMeterX: number;
+      startMeterY: number;
+      origW: number;
+      origH: number;
+      recorded: boolean;
+    };
 
 const PX_PER_M = 56;
 
@@ -32,6 +101,7 @@ export const Floorplan2D: React.FC<Floorplan2DProps> = ({
   readonly = false,
   compact = false,
 }) => {
+  const uid = useId().replace(/:/g, '');
   const store = useHabitatStore();
   const mission = missionOverride ?? store.mission;
   const zones = zonesOverride ?? store.zones;
@@ -45,41 +115,78 @@ export const Floorplan2D: React.FC<Floorplan2DProps> = ({
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [interaction, setInteraction] = useState<
-    | null
-    | { mode: 'pan'; startX: number; startY: number; origPanX: number; origPanY: number }
-    | { mode: 'move'; zoneId: string; offsetX: number; offsetY: number; moved: boolean }
-    | {
-        mode: 'resize';
-        zoneId: string;
-        startX: number;
-        startY: number;
-        origW: number;
-        origH: number;
+  const [interaction, setInteraction] = useState<InteractionState>(null);
+  const [crewEyePose, setCrewEyePose] = useState<CrewEyePoseEvent | null>(null);
+
+  useEffect(() => {
+    if (readonly || compact) return;
+    const onCrewEye = (e: Event) => {
+      const detail = (e as CustomEvent<CrewEyePoseEvent>).detail;
+      if (!detail || !detail.active) {
+        setCrewEyePose(null);
+      } else {
+        setCrewEyePose(detail);
       }
-  >(null);
+    };
+    window.addEventListener('habitat:creweye', onCrewEye);
+    return () => window.removeEventListener('habitat:creweye', onCrewEye);
+  }, [readonly, compact]);
+
+  const zoomRef = useRef(zoom);
+  const panRef = useRef(pan);
+  const interactionRef = useRef(interaction);
+  zoomRef.current = zoom;
+  panRef.current = pan;
+  interactionRef.current = interaction;
+
+  const padM = 1.05;
+  const vbWidth = (hullW + padM * 2) * PX_PER_M;
+  const vbHeight = (hullD + padM * 2) * PX_PER_M;
+  const toPx = (m: number) => (m + padM) * PX_PER_M;
 
   const deckZones = useMemo(
     () => zones.filter((z) => z.deck === activeDeck),
     [zones, activeDeck]
   );
 
-  const padM = 1.25;
-  const vbWidth = (hullW + padM * 2) * PX_PER_M;
-  const vbHeight = (hullD + padM * 2) * PX_PER_M;
+  // Center pan on highlighted zone when clicking a violation in Inspector while zoomed
+  useEffect(() => {
+    if (readonly || store.focusPulseTick === 0 || store.highlightedZoneIds.length === 0) return;
+    const target = zones.find((z) => z.id === store.highlightedZoneIds[0]);
+    if (!target || target.deck !== activeDeck) return;
+    if (zoomRef.current > 1.15) {
+      const targetSvgX = (target.x + target.width / 2 + padM) * PX_PER_M;
+      const targetSvgY = (target.y + target.height / 2 + padM) * PX_PER_M;
+      setPan({
+        x: vbWidth / 2 - targetSvgX,
+        y: vbHeight / 2 - targetSvgY,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.focusPulseTick]);
 
-  // Convert client pointer coordinates to habitat meters
+  const getSvgScale = (currentZoom: number) => {
+    const svg = svgRef.current;
+    if (!svg) return 1;
+    const rect = svg.getBoundingClientRect();
+    const w = Math.max(1, rect.width);
+    const h = Math.max(1, rect.height);
+    return Math.max(vbWidth / currentZoom / w, vbHeight / currentZoom / h);
+  };
+
   const clientToMeters = (clientX: number, clientY: number) => {
     const svg = svgRef.current;
     if (!svg) return { x: 0, y: 0 };
     const rect = svg.getBoundingClientRect();
-    const scaleX = vbWidth / zoom / rect.width;
-    const scaleY = vbHeight / zoom / rect.height;
-    const scale = Math.max(scaleX, scaleY);
-    const renderedW = rect.width * scale;
-    const renderedH = rect.height * scale;
-    const originX = (vbWidth - renderedW) / 2 - pan.x;
-    const originY = (vbHeight - renderedH) / 2 - pan.y;
+    const w = Math.max(1, rect.width);
+    const h = Math.max(1, rect.height);
+    const curZoom = zoomRef.current;
+    const curPan = panRef.current;
+    const scale = Math.max(vbWidth / curZoom / w, vbHeight / curZoom / h);
+    const renderedW = w * scale;
+    const renderedH = h * scale;
+    const originX = (vbWidth - renderedW) / 2 - curPan.x;
+    const originY = (vbHeight - renderedH) / 2 - curPan.y;
 
     const svgX = originX + (clientX - rect.left) * scale;
     const svgY = originY + (clientY - rect.top) * scale;
@@ -89,6 +196,93 @@ export const Floorplan2D: React.FC<Floorplan2DProps> = ({
     };
   };
 
+  const hasActiveInteraction = interaction !== null;
+
+  // Attach global pointer/blur listeners ONCE per drag/resize/pan gesture without memory leaks
+  useEffect(() => {
+    if (!hasActiveInteraction || readonly) return;
+
+    const onWindowPointerMove = (e: PointerEvent) => {
+      const active = interactionRef.current;
+      if (!active || e.pointerId !== active.pointerId) return;
+
+      if (active.mode === 'pan') {
+        const scale = getSvgScale(zoomRef.current);
+        const dx = (e.clientX - active.startX) * scale;
+        const dy = (e.clientY - active.startY) * scale;
+        setPan({
+          x: active.origPanX + dx,
+          y: active.origPanY + dy,
+        });
+        return;
+      }
+
+      if (active.mode === 'move') {
+        const slop = Math.hypot(
+          e.clientX - active.startClientX,
+          e.clientY - active.startClientY
+        );
+        if (!active.recorded && slop < 3) return;
+        const pt = clientToMeters(e.clientX, e.clientY);
+        const nx = snapToGrid(pt.x - active.offsetX);
+        const ny = snapToGrid(pt.y - active.offsetY);
+        useHabitatStore.getState().moveZone(active.zoneId, nx, ny, !active.recorded);
+        if (!active.recorded) {
+          const updated: InteractionState = { ...active, recorded: true };
+          interactionRef.current = updated;
+          setInteraction(updated);
+        }
+        return;
+      }
+
+      if (active.mode === 'resize') {
+        const pt = clientToMeters(e.clientX, e.clientY);
+        const dw = pt.x - active.startMeterX;
+        const dh = pt.y - active.startMeterY;
+        useHabitatStore
+          .getState()
+          .resizeZone(
+            active.zoneId,
+            active.origW + dw,
+            active.origH + dh,
+            undefined,
+            undefined,
+            !active.recorded
+          );
+        if (!active.recorded) {
+          const updated: InteractionState = { ...active, recorded: true };
+          interactionRef.current = updated;
+          setInteraction(updated);
+        }
+      }
+    };
+
+    const stopInteraction = (e?: PointerEvent) => {
+      const active = interactionRef.current;
+      if (e && active && e.pointerId !== active.pointerId) return;
+      interactionRef.current = null;
+      setInteraction(null);
+    };
+
+    const onWindowBlur = () => {
+      interactionRef.current = null;
+      setInteraction(null);
+    };
+
+    window.addEventListener('pointermove', onWindowPointerMove, { passive: true });
+    window.addEventListener('pointerup', stopInteraction);
+    window.addEventListener('pointercancel', stopInteraction);
+    window.addEventListener('blur', onWindowBlur);
+
+    return () => {
+      window.removeEventListener('pointermove', onWindowPointerMove);
+      window.removeEventListener('pointerup', stopInteraction);
+      window.removeEventListener('pointercancel', stopInteraction);
+      window.removeEventListener('blur', onWindowBlur);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasActiveInteraction, readonly]);
+
   const handleWheel = (e: React.WheelEvent) => {
     if (readonly) return;
     e.preventDefault();
@@ -96,82 +290,62 @@ export const Floorplan2D: React.FC<Floorplan2DProps> = ({
     setZoom((z) => Math.max(0.55, Math.min(2.8, Number((z * factor).toFixed(2)))));
   };
 
-  const handleBackgroundMouseDown = (e: React.MouseEvent) => {
+  const handleBackgroundPointerDown = (e: React.PointerEvent) => {
     if (readonly) return;
-    if (e.button !== 0) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
     store.selectZone(null);
-    setInteraction({
+    const next: InteractionState = {
       mode: 'pan',
+      pointerId: e.pointerId,
       startX: e.clientX,
       startY: e.clientY,
       origPanX: pan.x,
       origPanY: pan.y,
-    });
+    };
+    interactionRef.current = next;
+    setInteraction(next);
   };
 
-  const handleZoneMouseDown = (e: React.MouseEvent, z: ZoneNode) => {
+  const handleZonePointerDown = (e: React.PointerEvent, z: ZoneNode) => {
     if (readonly) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.stopPropagation();
     store.selectZone(z.id);
+    if (z.locked) return;
     const pt = clientToMeters(e.clientX, e.clientY);
-    setInteraction({
+    const next: InteractionState = {
       mode: 'move',
+      pointerId: e.pointerId,
       zoneId: z.id,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
       offsetX: pt.x - z.x,
       offsetY: pt.y - z.y,
-      moved: false,
-    });
+      recorded: false,
+    };
+    interactionRef.current = next;
+    setInteraction(next);
   };
 
-  const handleResizeMouseDown = (e: React.MouseEvent, z: ZoneNode) => {
+  const handleResizePointerDown = (e: React.PointerEvent, z: ZoneNode) => {
     if (readonly) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.stopPropagation();
+    store.selectZone(z.id);
+    if (z.locked) return;
     const pt = clientToMeters(e.clientX, e.clientY);
-    setInteraction({
+    const next: InteractionState = {
       mode: 'resize',
+      pointerId: e.pointerId,
       zoneId: z.id,
-      startX: pt.x,
-      startY: pt.y,
+      startMeterX: pt.x,
+      startMeterY: pt.y,
       origW: z.width,
       origH: z.height,
-    });
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!interaction || readonly) return;
-    if (interaction.mode === 'pan') {
-      const dx = (e.clientX - interaction.startX) / zoom;
-      const dy = (e.clientY - interaction.startY) / zoom;
-      setPan({ x: interaction.origPanX + dx, y: interaction.origPanY + dy });
-      return;
-    }
-
-    const pt = clientToMeters(e.clientX, e.clientY);
-    if (interaction.mode === 'move') {
-      const nx = snapToGrid(pt.x - interaction.offsetX);
-      const ny = snapToGrid(pt.y - interaction.offsetY);
-      const clampedX = Math.max(-0.5, Math.min(hullW, nx));
-      const clampedY = Math.max(-0.5, Math.min(hullD, ny));
-      store.moveZone(interaction.zoneId, clampedX, clampedY, !interaction.moved);
-      if (!interaction.moved) {
-        setInteraction({ ...interaction, moved: true });
-      }
-    } else if (interaction.mode === 'resize') {
-      const dw = pt.x - interaction.startX;
-      const dh = pt.y - interaction.startY;
-      store.resizeZone(
-        interaction.zoneId,
-        interaction.origW + dw,
-        interaction.origH + dh,
-        undefined,
-        undefined,
-        false
-      );
-    }
-  };
-
-  const handleMouseUp = () => {
-    setInteraction(null);
+      recorded: false,
+    };
+    interactionRef.current = next;
+    setInteraction(next);
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -181,14 +355,20 @@ export const Floorplan2D: React.FC<Floorplan2DProps> = ({
     if (!type || !ZONE_CATALOG[type]) return;
     const cat = ZONE_CATALOG[type];
     const pt = clientToMeters(e.clientX, e.clientY);
-    store.addZone(type, snapToGrid(pt.x - cat.defaultWidth / 2), snapToGrid(pt.y - cat.defaultHeight / 2));
+    store.addZone(
+      type,
+      snapToGrid(pt.x - cat.defaultWidth / 2),
+      snapToGrid(pt.y - cat.defaultHeight / 2)
+    );
   };
 
   const selectedZone = !readonly
     ? deckZones.find((z) => z.id === store.selectedZoneId) ?? null
     : null;
+  const selectedCat = selectedZone
+    ? ZONE_CATALOG[selectedZone.type] ?? ZONE_CATALOG.stowage
+    : null;
 
-  // Build violation lookup per zone for red/amber border rings
   const zoneSeverityMap = useMemo(() => {
     const map = new Map<string, 'CRITICAL' | 'WARNING'>();
     for (const v of report.violations) {
@@ -210,31 +390,52 @@ export const Floorplan2D: React.FC<Floorplan2DProps> = ({
     (p) => p.deck === activeDeck && p.reachable && p.points.length >= 2
   );
   const deckBottlenecks = report.egress.bottleneckPoints.filter((b) => b.deck === activeDeck);
+  const deckAirflowLinks = (report.airflowLinks ?? []).filter(
+    (a) => a.deck === activeDeck && a.points.length >= 2
+  );
+  const waterShieldSet = useMemo(
+    () => new Set(report.waterWall?.contributingZoneIds ?? []),
+    [report.waterWall]
+  );
+  const stagnantSet = useMemo(
+    () => new Set(report.stagnantZoneIds ?? []),
+    [report.stagnantZoneIds]
+  );
 
   const viewBox = `${(vbWidth - vbWidth / zoom) / 2 - pan.x} ${(vbHeight - vbHeight / zoom) / 2 - pan.y} ${vbWidth / zoom} ${vbHeight / zoom}`;
 
-  const toPx = (m: number) => (m + padM) * PX_PER_M;
+  const getChevronPoints = (rot: 0 | 90 | 180 | 270) => {
+    if (rot === 90) return '4,0 -3,-4 -3,4';
+    if (rot === 180) return '0,4 -4,-3 4,-3';
+    if (rot === 270) return '-4,0 3,-4 3,4';
+    return '0,-4 -4,3 4,3';
+  };
 
   return (
-    <div className="relative w-full h-full bg-[#090D16] flex flex-col overflow-hidden select-none">
-      {/* Top Floating Toolbar */}
+    <div className="w-full h-full bg-[var(--surface-canvas)] flex flex-col overflow-hidden select-none">
+      {/* Docked CAD Control Strip (Never obscures ruler ticks) */}
       {!compact && (
-        <div className="absolute top-2.5 left-2.5 right-2.5 z-10 flex items-center justify-between pointer-events-none">
-          <div className="flex items-center gap-1.5 pointer-events-auto">
-            <span className="px-2 py-1 rounded bg-[#111827]/95 border border-slate-700/80 text-[10px] font-mono-telemetry uppercase tracking-wider text-cyan-300 shadow">
-              2D CAD • {hullW.toFixed(1)}m × {hullD.toFixed(1)}m • 0.25m SNAP
+        <div className="min-h-8 shrink-0 bg-[var(--surface-panel)] border-b border-[var(--border-subtle)] px-2.5 py-1 flex flex-wrap items-center justify-between gap-1.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[10px] font-mono-telemetry uppercase tracking-wider text-cyan-300 font-semibold">
+              2D CAD • {hullW.toFixed(1)}×{hullD.toFixed(1)}m • 0.25m Grid
             </span>
 
             {hull.decks > 1 && !readonly && (
-              <div className="flex items-center bg-[#111827]/95 border border-slate-700/80 rounded p-0.5 gap-0.5 shadow">
+              <div
+                role="group"
+                aria-label="Deck Selector"
+                className="flex items-center bg-[var(--surface-canvas)] border border-[var(--border-subtle)] rounded p-0.5 gap-0.5"
+              >
                 {Array.from({ length: hull.decks }).map((_, d) => (
                   <button
                     key={d}
+                    type="button"
                     onClick={() => store.setActiveDeck(d)}
                     className={`px-2 py-0.5 rounded text-[10px] font-mono-telemetry cursor-pointer transition-colors ${
                       activeDeck === d
-                        ? 'bg-cyan-500/25 text-cyan-200'
-                        : 'text-slate-400 hover:text-slate-200'
+                        ? 'bg-cyan-500/20 text-cyan-200 font-semibold'
+                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                     }`}
                   >
                     Deck {d + 1}
@@ -245,51 +446,78 @@ export const Floorplan2D: React.FC<Floorplan2DProps> = ({
           </div>
 
           {!readonly && (
-            <div className="flex items-center gap-1.5 pointer-events-auto">
+            <div className="flex items-center gap-1 flex-wrap">
               <button
+                type="button"
+                aria-pressed={store.showEgressOverlay}
                 onClick={store.toggleEgressOverlay}
-                className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border transition-colors cursor-pointer ${
+                className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors cursor-pointer ${
                   store.showEgressOverlay
-                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
-                    : 'bg-[#111827]/90 text-slate-400 border-slate-700/80'
+                    ? 'bg-emerald-500/15 text-emerald-200 border-emerald-500/40'
+                    : 'bg-[var(--surface-elevated)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:text-[var(--text-primary)]'
                 }`}
               >
                 <Route className="w-3 h-3" />
-                A* Egress
+                Egress
               </button>
+
               <button
+                type="button"
+                aria-pressed={store.showAirflowOverlay}
+                onClick={store.toggleAirflowOverlay}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors cursor-pointer ${
+                  store.showAirflowOverlay
+                    ? 'bg-cyan-500/15 text-cyan-200 border-cyan-500/40'
+                    : 'bg-[var(--surface-elevated)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:text-[var(--text-primary)]'
+                }`}
+                title="Toggle ISS IMV Airflow & CO2 Pocket Overlay"
+              >
+                <Wind className="w-3 h-3" />
+                Airflow
+              </button>
+
+              <button
+                type="button"
+                aria-pressed={store.showHazardOverlay}
                 onClick={store.toggleHazardOverlay}
-                className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border transition-colors cursor-pointer ${
+                className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors cursor-pointer ${
                   store.showHazardOverlay
-                    ? 'bg-rose-500/15 text-rose-300 border-rose-500/40'
-                    : 'bg-[#111827]/90 text-slate-400 border-slate-700/80'
+                    ? 'bg-rose-500/15 text-rose-200 border-rose-500/40'
+                    : 'bg-[var(--surface-elevated)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:text-[var(--text-primary)]'
                 }`}
               >
                 <AlertTriangle className="w-3 h-3" />
                 Hazards
               </button>
-              <div className="flex items-center bg-[#111827]/95 border border-slate-700/80 rounded overflow-hidden">
+
+              <div className="flex items-center bg-[var(--surface-canvas)] border border-[var(--border-subtle)] rounded overflow-hidden">
                 <button
+                  type="button"
                   onClick={() => setZoom((z) => Math.min(2.8, Number((z * 1.15).toFixed(2))))}
-                  className="p-1 text-slate-300 hover:bg-slate-800 cursor-pointer"
+                  className="p-1 text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] cursor-pointer"
                   title="Zoom In"
+                  aria-label="Zoom In"
                 >
                   <ZoomIn className="w-3.5 h-3.5" />
                 </button>
                 <button
+                  type="button"
                   onClick={() => setZoom((z) => Math.max(0.55, Number((z * 0.85).toFixed(2))))}
-                  className="p-1 text-slate-300 hover:bg-slate-800 cursor-pointer"
+                  className="p-1 text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] cursor-pointer"
                   title="Zoom Out"
+                  aria-label="Zoom Out"
                 >
                   <ZoomOut className="w-3.5 h-3.5" />
                 </button>
                 <button
+                  type="button"
                   onClick={() => {
                     setZoom(1);
                     setPan({ x: 0, y: 0 });
                   }}
-                  className="p-1 text-slate-300 hover:bg-slate-800 cursor-pointer"
-                  title="Fit Hull"
+                  className="p-1 text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] cursor-pointer"
+                  title="Reset View"
+                  aria-label="Reset View"
                 >
                   <Maximize2 className="w-3.5 h-3.5" />
                 </button>
@@ -299,453 +527,721 @@ export const Floorplan2D: React.FC<Floorplan2DProps> = ({
         </div>
       )}
 
-      {/* Selected Zone Quick Actions Bar */}
-      {selectedZone && !readonly && !compact && (
-        <div className="absolute bottom-2.5 left-2.5 z-10 flex items-center gap-2 bg-[#111827]/95 border border-cyan-500/40 rounded-lg px-3 py-1.5 shadow-lg">
-          <span
-            className="w-2.5 h-2.5 rounded-sm"
-            style={{ backgroundColor: ZONE_CATALOG[selectedZone.type].color }}
-          />
-          <span className="text-xs font-semibold text-slate-100">{selectedZone.label}</span>
-          <span className="text-[10px] font-mono-telemetry text-slate-400">
-            ({selectedZone.x.toFixed(2)}, {selectedZone.y.toFixed(2)}) • {selectedZone.width.toFixed(2)}×
-            {selectedZone.height.toFixed(2)}m • {(selectedZone.width * selectedZone.height * selectedZone.zHeight).toFixed(1)} m³
-          </span>
-          <div className="h-3.5 w-px bg-slate-700" />
-          <button
-            onClick={() => store.rotateZone(selectedZone.id)}
-            className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[11px] text-cyan-300 cursor-pointer"
-            title="Rotate 90°"
-          >
-            <RotateCw className="w-3 h-3" />
-            90°
-          </button>
-          <button
-            onClick={() => store.deleteZone(selectedZone.id)}
-            className="flex items-center gap-1 px-2 py-0.5 rounded bg-rose-500/15 hover:bg-rose-500/25 text-[11px] text-rose-300 cursor-pointer"
-            title="Delete Zone"
-          >
-            <Trash2 className="w-3 h-3" />
-            Delete
-          </button>
-        </div>
-      )}
-
       {/* Interactive SVG CAD Canvas */}
-      <svg
-        ref={svgRef}
-        viewBox={viewBox}
-        onWheel={handleWheel}
-        onMouseDown={handleBackgroundMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={handleDrop}
-        className="w-full h-full cursor-crosshair"
-      >
-        <defs>
-          <pattern
-            id={`grid-minor-${compact ? 'c' : 'm'}`}
-            width={PX_PER_M * 0.25}
-            height={PX_PER_M * 0.25}
-            patternUnits="userSpaceOnUse"
-          >
-            <path
-              d={`M ${PX_PER_M * 0.25} 0 L 0 0 0 ${PX_PER_M * 0.25}`}
-              fill="none"
-              stroke="#1e293b"
-              strokeWidth="0.6"
-              strokeOpacity="0.45"
-            />
-          </pattern>
-          <pattern
-            id={`grid-major-${compact ? 'c' : 'm'}`}
-            width={PX_PER_M}
-            height={PX_PER_M}
-            patternUnits="userSpaceOnUse"
-          >
-            <rect
+      <div className="relative flex-1 min-h-0 w-full">
+        <svg
+          ref={svgRef}
+          viewBox={viewBox}
+          onWheel={handleWheel}
+          onPointerDown={handleBackgroundPointerDown}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={handleDrop}
+          style={{ touchAction: readonly ? 'pan-y' : 'none' }}
+          className={`w-full h-full ${readonly ? 'cursor-default' : 'cursor-crosshair'}`}
+        >
+          <defs>
+            <pattern
+              id={`grid-minor-${uid}`}
+              width={PX_PER_M * 0.25}
+              height={PX_PER_M * 0.25}
+              patternUnits="userSpaceOnUse"
+            >
+              <path
+                d={`M ${PX_PER_M * 0.25} 0 L 0 0 0 ${PX_PER_M * 0.25}`}
+                fill="none"
+                stroke="#1e293b"
+                strokeWidth="0.6"
+                strokeOpacity="0.45"
+              />
+            </pattern>
+            <pattern
+              id={`grid-major-${uid}`}
               width={PX_PER_M}
               height={PX_PER_M}
-              fill={`url(#grid-minor-${compact ? 'c' : 'm'})`}
-            />
-            <path
-              d={`M ${PX_PER_M} 0 L 0 0 0 ${PX_PER_M}`}
-              fill="none"
-              stroke="#334155"
-              strokeWidth="1"
-              strokeOpacity="0.55"
-            />
-          </pattern>
-        </defs>
+              patternUnits="userSpaceOnUse"
+            >
+              <rect width={PX_PER_M} height={PX_PER_M} fill={`url(#grid-minor-${uid})`} />
+              <path
+                d={`M ${PX_PER_M} 0 L 0 0 0 ${PX_PER_M}`}
+                fill="none"
+                stroke="#334155"
+                strokeWidth="1"
+                strokeOpacity="0.55"
+              />
+            </pattern>
 
-        {/* Background Grid */}
-        <rect
-          x={-vbWidth}
-          y={-vbHeight}
-          width={vbWidth * 3}
-          height={vbHeight * 3}
-          fill={`url(#grid-major-${compact ? 'c' : 'm'})`}
-        />
+            {deckZones.map((z) => (
+              <clipPath key={`clip-${z.id}`} id={`clip-${uid}-${z.id}`}>
+                <rect
+                  x={toPx(z.x) + 3}
+                  y={toPx(z.y) + 3}
+                  width={Math.max(4, z.width * PX_PER_M - 6)}
+                  height={Math.max(4, z.height * PX_PER_M - 6)}
+                  rx="3"
+                />
+              </clipPath>
+            ))}
+          </defs>
 
-        {/* Pressure Hull Outer & Inner Envelope */}
-        {hull.type === 'surface_dome' ? (
-          <g>
-            <circle
-              cx={toPx(hullW / 2)}
-              cy={toPx(hullD / 2)}
-              r={(hullW / 2) * PX_PER_M}
-              fill="#0f172a"
-              fillOpacity="0.88"
-              stroke="#38bdf8"
-              strokeWidth="3"
-              strokeOpacity="0.65"
-            />
-            <circle
-              cx={toPx(hullW / 2)}
-              cy={toPx(hullD / 2)}
-              r={(hullW / 2 - wall) * PX_PER_M}
-              fill="#0b1220"
-              stroke="#475569"
-              strokeWidth="1.5"
-              strokeDasharray="6 4"
-            />
-          </g>
-        ) : (
-          <g>
-            <rect
-              x={toPx(0)}
-              y={toPx(0)}
-              width={hullW * PX_PER_M}
-              height={hullD * PX_PER_M}
-              rx={cornerR * PX_PER_M}
-              ry={cornerR * PX_PER_M}
-              fill="#0f172a"
-              fillOpacity="0.9"
-              stroke={hull.type === 'inflatable' ? '#a855f7' : '#38bdf8'}
-              strokeWidth="3.5"
-              strokeOpacity="0.7"
-            />
-            <rect
-              x={toPx(wall)}
-              y={toPx(wall)}
-              width={(hullW - wall * 2) * PX_PER_M}
-              height={(hullD - wall * 2) * PX_PER_M}
-              rx={Math.max(0, cornerR - wall) * PX_PER_M}
-              ry={Math.max(0, cornerR - wall) * PX_PER_M}
-              fill="#0b1220"
-              stroke="#475569"
-              strokeWidth="1.25"
-              strokeDasharray="6 4"
-            />
-          </g>
-        )}
+          {/* Background Grid */}
+          <rect
+            x={-vbWidth}
+            y={-vbHeight}
+            width={vbWidth * 3}
+            height={vbHeight * 3}
+            fill={`url(#grid-major-${uid})`}
+          />
 
-        {/* Dimension Rulers */}
-        <g className="font-mono-telemetry" fill="#64748b" fontSize="11">
-          {Array.from({ length: Math.floor(hullW) + 1 }).map((_, m) => (
+          {/* Pressure Hull Outer & Inner Envelope */}
+          {hull.type === 'surface_dome' ? (
+            <g>
+              <circle
+                cx={toPx(hullW / 2)}
+                cy={toPx(hullD / 2)}
+                r={(hullW / 2) * PX_PER_M}
+                fill="#0f172a"
+                fillOpacity="0.9"
+                stroke="#38bdf8"
+                strokeWidth="3"
+                strokeOpacity="0.68"
+              />
+              <circle
+                cx={toPx(hullW / 2)}
+                cy={toPx(hullD / 2)}
+                r={(hullW / 2 - wall) * PX_PER_M}
+                fill="#0b1220"
+                stroke="#475569"
+                strokeWidth="1.5"
+                strokeDasharray="6 4"
+              />
+            </g>
+          ) : (
+            <g>
+              <rect
+                x={toPx(0)}
+                y={toPx(0)}
+                width={hullW * PX_PER_M}
+                height={hullD * PX_PER_M}
+                rx={cornerR * PX_PER_M}
+                ry={cornerR * PX_PER_M}
+                fill="#0f172a"
+                fillOpacity="0.9"
+                stroke={hull.type === 'inflatable' ? '#a855f7' : '#38bdf8'}
+                strokeWidth="3.5"
+                strokeOpacity="0.72"
+              />
+              <rect
+                x={toPx(wall)}
+                y={toPx(wall)}
+                width={(hullW - wall * 2) * PX_PER_M}
+                height={(hullD - wall * 2) * PX_PER_M}
+                rx={Math.max(0, cornerR - wall) * PX_PER_M}
+                ry={Math.max(0, cornerR - wall) * PX_PER_M}
+                fill="#0b1220"
+                stroke="#475569"
+                strokeWidth="1.25"
+                strokeDasharray="6 4"
+              />
+            </g>
+          )}
+
+          {/* Dimension Rulers (High-contrast slate >= 4.5:1) */}
+          {!compact && (
+            <g className="font-mono-telemetry" fill="#94a3b8" fontSize="10.5" pointerEvents="none">
+              {Array.from({ length: Math.floor(hullW) + 1 }).map((_, m) => (
+                <text key={`rx-${m}`} x={toPx(m)} y={toPx(-0.32)} textAnchor="middle">
+                  {m}m
+                </text>
+              ))}
+              {Array.from({ length: Math.floor(hullD) + 1 }).map((_, m) => (
+                <text key={`ry-${m}`} x={toPx(-0.42)} y={toPx(m) + 4} textAnchor="end">
+                  {m}m
+                </text>
+              ))}
+            </g>
+          )}
+
+          {/* Empty Deck Teaching State */}
+          {deckZones.length === 0 && !readonly && (
             <text
-              key={`rx-${m}`}
-              x={toPx(m)}
-              y={toPx(-0.35)}
+              x={toPx(hullW / 2)}
+              y={toPx(hullD / 2)}
               textAnchor="middle"
+              fill="#cbd5e1"
+              fontSize="13"
+              className="font-mono-telemetry"
+              pointerEvents="none"
             >
-              {m}m
+              Deck {activeDeck + 1} Clear — Add modules from Zone Library or select a Heritage Preset
             </text>
-          ))}
-          {Array.from({ length: Math.floor(hullD) + 1 }).map((_, m) => (
-            <text
-              key={`ry-${m}`}
-              x={toPx(-0.45)}
-              y={toPx(m) + 4}
-              textAnchor="end"
-            >
-              {m}m
-            </text>
-          ))}
-        </g>
+          )}
 
-        {/* Hazard Halos (Acoustic + Contamination) */}
-        {(store.showHazardOverlay || readonly) && (
-          <g pointerEvents="none">
-            {report.acousticPairs
-              .filter((p) => p.violates)
-              .map((p) => {
-                const src = deckZones.find((z) => z.id === p.sourceId);
-                const tgt = deckZones.find((z) => z.id === p.targetId);
-                if (!src || !tgt) return null;
-                const sx = toPx(src.x + src.width / 2);
-                const sy = toPx(src.y + src.height / 2);
-                const tx = toPx(tgt.x + tgt.width / 2);
-                const ty = toPx(tgt.y + tgt.height / 2);
-                return (
-                  <g key={`ac-${p.sourceId}-${p.targetId}`}>
+          {/* Background Acoustic Hazard Aura Circles (Underneath module cards) */}
+          {(store.showHazardOverlay || readonly) && (
+            <g pointerEvents="none">
+              {report.acousticPairs
+                .filter((p) => p.violates)
+                .map((p) => {
+                  const src = deckZones.find((z) => z.id === p.sourceId);
+                  if (!src) return null;
+                  const sx = toPx(src.x + src.width / 2);
+                  const sy = toPx(src.y + src.height / 2);
+                  return (
                     <circle
+                      key={`ac-aura-${p.sourceId}-${p.targetId}`}
                       cx={sx}
                       cy={sy}
-                      r={2.4 * PX_PER_M}
+                      r={2.2 * PX_PER_M}
                       fill="#f43f5e"
-                      fillOpacity="0.08"
+                      fillOpacity="0.06"
                       stroke="#f43f5e"
-                      strokeWidth="1.2"
+                      strokeWidth="1.1"
                       strokeDasharray="4 4"
-                      strokeOpacity="0.45"
+                      strokeOpacity="0.38"
                     />
-                    <line
-                      x1={sx}
-                      y1={sy}
-                      x2={tx}
-                      y2={ty}
-                      stroke="#fb7185"
-                      strokeWidth="2"
-                      strokeDasharray="5 3"
-                    />
-                    <rect
-                      x={(sx + tx) / 2 - 28}
-                      y={(sy + ty) / 2 - 10}
-                      width="56"
-                      height="18"
-                      rx="4"
-                      fill="#881337"
-                      stroke="#fb7185"
-                      strokeWidth="1"
-                    />
-                    <text
-                      x={(sx + tx) / 2}
-                      y={(sy + ty) / 2 + 3}
-                      textAnchor="middle"
-                      fill="#ffe4e6"
-                      fontSize="10"
-                      className="font-mono-telemetry font-bold"
-                    >
-                      {p.receivedDba} dBA
-                    </text>
-                  </g>
-                );
-              })}
+                  );
+                })}
+            </g>
+          )}
 
-            {report.contaminationPairs
-              .filter((p) => p.violates)
-              .map((p) => {
-                const hyg = deckZones.find((z) => z.id === p.hygieneId);
-                const tgt = deckZones.find((z) => z.id === p.targetId);
-                if (!hyg || !tgt) return null;
-                const hx = toPx(hyg.x + hyg.width / 2);
-                const hy = toPx(hyg.y + hyg.height / 2);
-                const tx = toPx(tgt.x + tgt.width / 2);
-                const ty = toPx(tgt.y + tgt.height / 2);
-                return (
-                  <g key={`ct-${p.hygieneId}-${p.targetId}`}>
-                    <circle
-                      cx={hx}
-                      cy={hy}
-                      r={3.0 * PX_PER_M}
-                      fill="#f59e0b"
-                      fillOpacity="0.07"
-                      stroke="#f59e0b"
-                      strokeWidth="1.2"
-                      strokeDasharray="6 4"
-                      strokeOpacity="0.45"
-                    />
-                    <line
-                      x1={hx}
-                      y1={hy}
-                      x2={tx}
-                      y2={ty}
-                      stroke="#fbbf24"
-                      strokeWidth="2"
-                      strokeDasharray="4 3"
-                    />
-                    <rect
-                      x={(hx + tx) / 2 - 26}
-                      y={(hy + ty) / 2 - 10}
-                      width="52"
-                      height="18"
-                      rx="4"
-                      fill="#78350f"
-                      stroke="#fbbf24"
-                      strokeWidth="1"
-                    />
-                    <text
-                      x={(hx + tx) / 2}
-                      y={(hy + ty) / 2 + 3}
-                      textAnchor="middle"
-                      fill="#fef3c7"
-                      fontSize="10"
-                      className="font-mono-telemetry font-bold"
-                    >
-                      {p.distanceM.toFixed(1)}m!
-                    </text>
-                  </g>
-                );
-              })}
-          </g>
-        )}
+          {/* Corridor Layer: ISS IMV Ventilation / CO2 Airflow Overlay (Underneath module cards) */}
+          {store.showAirflowOverlay && !readonly && (
+            <g pointerEvents="none">
+              {deckAirflowLinks.map((af) => (
+                <polyline
+                  key={`af-${af.fromEclssId}-${af.toZoneId}`}
+                  points={af.points.map((pt) => `${toPx(pt.x)},${toPx(pt.y)}`).join(' ')}
+                  fill="none"
+                  stroke={af.stagnantRisk ? '#f43f5e' : '#22d3ee'}
+                  strokeWidth={af.stagnantRisk ? '2.4' : '1.9'}
+                  strokeOpacity="0.82"
+                  strokeDasharray="5 5"
+                  className="animate-egress-flow"
+                />
+              ))}
+            </g>
+          )}
 
-        {/* Placed Habitat Zones */}
-        {deckZones.map((z) => {
-          const cat = ZONE_CATALOG[z.type];
-          const isSelected = !readonly && store.selectedZoneId === z.id;
-          const isHighlighted = !readonly && store.highlightedZoneIds.includes(z.id);
-          const sev = zoneSeverityMap.get(z.id);
-          const area = (z.width * z.height).toFixed(1);
-          const vol = (z.width * z.height * z.zHeight).toFixed(1);
-
-          const xPx = toPx(z.x);
-          const yPx = toPx(z.y);
-          const wPx = z.width * PX_PER_M;
-          const hPx = z.height * PX_PER_M;
-
-          const strokeColor = isSelected
-            ? '#22d3ee'
-            : isHighlighted
-              ? '#facc15'
-              : sev === 'CRITICAL'
-                ? '#f43f5e'
-                : sev === 'WARNING'
-                  ? '#f59e0b'
-                  : cat.accentColor;
-
-          return (
-            <g
-              key={z.id}
-              onMouseDown={(e) => handleZoneMouseDown(e, z)}
-              className={readonly ? '' : 'cursor-move'}
-            >
-              {/* Storm Shelter water-wall glow */}
-              {z.type === 'storm_shelter' && (
-                <rect
-                  x={xPx - 4}
-                  y={yPx - 4}
-                  width={wPx + 8}
-                  height={hPx + 8}
-                  rx="7"
+          {/* Corridor Layer: A* Emergency Egress Paths Overlay (Underneath module cards) */}
+          {(store.showEgressOverlay || readonly) && (
+            <g pointerEvents="none">
+              {deckShelterPaths.map((p) => (
+                <polyline
+                  key={`sh-${p.fromZoneId}`}
+                  points={p.points.map((pt) => `${toPx(pt.x)},${toPx(pt.y)}`).join(' ')}
                   fill="none"
                   stroke="#38bdf8"
-                  strokeWidth="2.5"
-                  strokeOpacity="0.45"
-                  strokeDasharray="4 3"
+                  strokeWidth="2.1"
+                  strokeOpacity="0.68"
+                  strokeDasharray="6 6"
+                  className="animate-egress-flow"
                 />
-              )}
+              ))}
 
-              <rect
-                x={xPx}
-                y={yPx}
-                width={wPx}
-                height={hPx}
-                rx="4"
-                fill={cat.color}
-                fillOpacity={isSelected ? 0.34 : 0.22}
-                stroke={strokeColor}
-                strokeWidth={isSelected || isHighlighted ? 2.6 : sev ? 2.2 : 1.5}
-              />
-
-              {/* Top accent bar */}
-              <rect
-                x={xPx + 1}
-                y={yPx + 1}
-                width={Math.max(0, wPx - 2)}
-                height="5"
-                rx="2"
-                fill={cat.color}
-                fillOpacity="0.85"
-              />
-
-              {/* Zone Label & Dimensions */}
-              <text
-                x={xPx + wPx / 2}
-                y={yPx + hPx / 2 - 4}
-                textAnchor="middle"
-                fill="#f8fafc"
-                fontSize={wPx < 95 ? '10' : '11.5'}
-                fontWeight="700"
-                pointerEvents="none"
-              >
-                {wPx < 95 ? cat.shortLabel : z.label.length > 20 ? `${z.label.slice(0, 18)}…` : z.label}
-              </text>
-              <text
-                x={xPx + wPx / 2}
-                y={yPx + hPx / 2 + 12}
-                textAnchor="middle"
-                fill="#cbd5e1"
-                fontSize="9.5"
-                className="font-mono-telemetry"
-                pointerEvents="none"
-              >
-                {area}m² • {vol}m³
-              </text>
-
-              {/* Resize Handle (SE corner) */}
-              {!readonly && (
-                <rect
-                  x={xPx + wPx - 10}
-                  y={yPx + hPx - 10}
-                  width="10"
-                  height="10"
-                  rx="2"
-                  fill={isSelected ? '#22d3ee' : '#94a3b8'}
-                  fillOpacity={isSelected ? 0.95 : 0.55}
-                  className="cursor-nwse-resize"
-                  onMouseDown={(e) => handleResizeMouseDown(e, z)}
+              {deckAirlockPaths.map((p) => (
+                <polyline
+                  key={`al-${p.fromZoneId}`}
+                  points={p.points.map((pt) => `${toPx(pt.x)},${toPx(pt.y)}`).join(' ')}
+                  fill="none"
+                  stroke="#10b981"
+                  strokeWidth="2.6"
+                  strokeOpacity="0.92"
+                  strokeDasharray="8 6"
+                  className="animate-egress-flow"
                 />
-              )}
+              ))}
             </g>
-          );
-        })}
+          )}
 
-        {/* A* Emergency Egress Paths Overlay */}
-        {(store.showEgressOverlay || readonly) && (
-          <g pointerEvents="none">
-            {deckShelterPaths.map((p) => (
-              <polyline
-                key={`sh-${p.fromZoneId}`}
-                points={p.points.map((pt) => `${toPx(pt.x)},${toPx(pt.y)}`).join(' ')}
-                fill="none"
-                stroke="#38bdf8"
-                strokeWidth="2.2"
-                strokeOpacity="0.65"
-                strokeDasharray="6 6"
-                className="animate-egress-flow"
-              />
-            ))}
+          {/* Placed Habitat Zones (Opaque base fill prevents corridor lines from crossing text) */}
+          {deckZones.map((z) => {
+            const cat = ZONE_CATALOG[z.type] ?? ZONE_CATALOG.stowage;
+            const isSelected = !readonly && store.selectedZoneId === z.id;
+            const isHighlighted = !readonly && store.highlightedZoneIds.includes(z.id);
+            const sev = zoneSeverityMap.get(z.id);
+            const isWaterContributor = waterShieldSet.has(z.id);
+            const isStagnant = stagnantSet.has(z.id);
+            const area = (z.width * z.height).toFixed(1);
+            const vol = (z.width * z.height * z.zHeight).toFixed(1);
 
-            {deckAirlockPaths.map((p) => (
-              <polyline
-                key={`al-${p.fromZoneId}`}
-                points={p.points.map((pt) => `${toPx(pt.x)},${toPx(pt.y)}`).join(' ')}
-                fill="none"
-                stroke="#10b981"
-                strokeWidth="3"
-                strokeOpacity="0.9"
-                strokeDasharray="8 6"
-                className="animate-egress-flow"
-              />
-            ))}
+            const xPx = toPx(z.x);
+            const yPx = toPx(z.y);
+            const wPx = z.width * PX_PER_M;
+            const hPx = z.height * PX_PER_M;
 
-            {/* Bottleneck Pinch-Points */}
-            {deckBottlenecks.map((b, i) => (
-              <g key={`bn-${i}`} transform={`translate(${toPx(b.x)}, ${toPx(b.y)})`}>
-                <polygon
-                  points="0,-9 9,0 0,9 -9,0"
-                  fill="#f59e0b"
-                  stroke="#fef3c7"
-                  strokeWidth="1.5"
+            const strokeColor = isSelected
+              ? '#22d3ee'
+              : isHighlighted
+                ? '#facc15'
+                : sev === 'CRITICAL'
+                  ? '#f43f5e'
+                  : sev === 'WARNING'
+                    ? '#f59e0b'
+                    : cat.accentColor;
+
+            const displayLabel = formatCadModuleLabel(z, wPx, cat.shortLabel);
+
+            return (
+              <g
+                key={z.id}
+                data-zone-id={z.id}
+                onPointerDown={(e) => handleZonePointerDown(e, z)}
+                className={readonly ? '' : z.locked ? 'cursor-pointer' : 'cursor-move'}
+              >
+                {/* Storm Shelter or Water-Wall Buffer Halo */}
+                {(z.type === 'storm_shelter' || isWaterContributor) && (
+                  <rect
+                    x={xPx - 3}
+                    y={yPx - 3}
+                    width={wPx + 6}
+                    height={hPx + 6}
+                    rx="6"
+                    fill="none"
+                    stroke="#38bdf8"
+                    strokeWidth={z.type === 'storm_shelter' ? '2.4' : '1.5'}
+                    strokeOpacity={z.type === 'storm_shelter' ? '0.5' : '0.35'}
+                    strokeDasharray="4 3"
+                  />
+                )}
+
+                {/* Solid dark module substrate so corridor lines never bleed through text */}
+                <rect
+                  x={xPx}
+                  y={yPx}
+                  width={wPx}
+                  height={hPx}
+                  rx="4"
+                  fill="#0b1220"
+                  fillOpacity="0.93"
                 />
-                <text
-                  y="3.5"
-                  textAnchor="middle"
-                  fill="#090D16"
-                  fontSize="10"
-                  fontWeight="800"
-                >
-                  !
-                </text>
+
+                <rect
+                  x={xPx}
+                  y={yPx}
+                  width={wPx}
+                  height={hPx}
+                  rx="4"
+                  fill={cat.color}
+                  fillOpacity={isSelected ? 0.36 : 0.25}
+                  stroke={strokeColor}
+                  strokeWidth={isSelected || isHighlighted ? 2.8 : sev ? 2.2 : 1.5}
+                />
+
+                {/* Top accent bar */}
+                <rect
+                  x={xPx + 1}
+                  y={yPx + 1}
+                  width={Math.max(0, wPx - 2)}
+                  height="4.5"
+                  rx="2"
+                  fill={cat.color}
+                  fillOpacity="0.88"
+                />
+
+                {/* Clipped Interior Label + Telemetry + Local-Vertical Chevron */}
+                <g clipPath={`url(#clip-${uid}-${z.id})`} pointerEvents="none">
+                  {/* Pinned/Locked indicator */}
+                  {z.locked && !compact && (
+                    <g transform={`translate(${xPx + 8}, ${yPx + 10})`}>
+                      <rect
+                        width="32"
+                        height="12"
+                        rx="2.5"
+                        fill="#0f172a"
+                        stroke="#38bdf8"
+                        strokeWidth="0.9"
+                      />
+                      <text
+                        x="16"
+                        y="8.5"
+                        textAnchor="middle"
+                        fill="#7dd3fc"
+                        fontSize="7.5"
+                        className="font-mono-telemetry font-bold"
+                      >
+                        PINNED
+                      </text>
+                    </g>
+                  )}
+
+                  {/* Orientation direction chevron (top-right inside module) */}
+                  {!compact && wPx >= 72 && hPx >= 56 && (
+                    <g transform={`translate(${xPx + wPx - 12}, ${yPx + 14})`}>
+                      <polygon
+                        points={getChevronPoints(z.rotation)}
+                        fill={mission.gravity === '0g' && z.rotation !== 0 ? '#f59e0b' : '#e2e8f0'}
+                        fillOpacity="0.9"
+                      />
+                    </g>
+                  )}
+
+                  <text
+                    x={xPx + wPx / 2}
+                    y={hPx >= 64 ? yPx + hPx / 2 - 3 : yPx + hPx / 2 + 4}
+                    textAnchor="middle"
+                    fill="#f8fafc"
+                    fontSize={wPx < 98 ? '9.5' : '10.5'}
+                    fontWeight="700"
+                  >
+                    {displayLabel}
+                  </text>
+
+                  {hPx >= 64 && wPx >= 76 && (
+                    <text
+                      x={xPx + wPx / 2}
+                      y={yPx + hPx / 2 + 12}
+                      textAnchor="middle"
+                      fill="#cbd5e1"
+                      fontSize="9"
+                      className="font-mono-telemetry"
+                    >
+                      {compact ? `${area}m²` : `${area}m² • ${vol}m³`}
+                    </text>
+                  )}
+
+                  {/* CO2 Stagnation badge when Airflow overlay active */}
+                  {store.showAirflowOverlay && isStagnant && !compact && (
+                    <g transform={`translate(${xPx + 6}, ${yPx + hPx - 18})`}>
+                      <rect
+                        width="52"
+                        height="13"
+                        rx="3"
+                        fill="#7f1d1d"
+                        stroke="#f87171"
+                        strokeWidth="0.8"
+                      />
+                      <text
+                        x="26"
+                        y="9.5"
+                        textAnchor="middle"
+                        fill="#fecaca"
+                        fontSize="8"
+                        className="font-mono-telemetry font-bold"
+                      >
+                        CO₂ RISK
+                      </text>
+                    </g>
+                  )}
+                </g>
+
+                {/* Touch-Friendly SE Resize Handle */}
+                {!readonly && !z.locked && (
+                  <g
+                    className="cursor-nwse-resize"
+                    onPointerDown={(e) => handleResizePointerDown(e, z)}
+                  >
+                    <rect
+                      x={xPx + wPx - 16}
+                      y={yPx + hPx - 16}
+                      width="16"
+                      height="16"
+                      fill="transparent"
+                    />
+                    <rect
+                      x={xPx + wPx - 10}
+                      y={yPx + hPx - 10}
+                      width="9"
+                      height="9"
+                      rx="2"
+                      fill={isSelected ? '#22d3ee' : '#94a3b8'}
+                      fillOpacity={isSelected ? 0.95 : 0.6}
+                    />
+                  </g>
+                )}
               </g>
-            ))}
-          </g>
-        )}
-      </svg>
+            );
+          })}
+
+          {/* Top Annotation Layer: Hazard Callout Connectors & Badges (Never clipped behind module cards) */}
+          {(store.showHazardOverlay || readonly) && (
+            <g pointerEvents="none">
+              {report.acousticPairs
+                .filter((p) => p.violates)
+                .map((p) => {
+                  const src = deckZones.find((z) => z.id === p.sourceId);
+                  const tgt = deckZones.find((z) => z.id === p.targetId);
+                  if (!src || !tgt) return null;
+                  const sx = toPx(src.x + src.width / 2);
+                  const sy = toPx(src.y + src.height / 2);
+                  const tx = toPx(tgt.x + tgt.width / 2);
+                  const ty = toPx(tgt.y + tgt.height / 2);
+                  const mx = (sx + tx) / 2;
+                  const my = (sy + ty) / 2;
+                  const badgeY = Math.abs(sy - ty) < 28 ? my - 27 : my - 8;
+                  return (
+                    <g key={`ac-fg-${p.sourceId}-${p.targetId}`}>
+                      <line
+                        x1={sx}
+                        y1={sy}
+                        x2={tx}
+                        y2={ty}
+                        stroke="#fb7185"
+                        strokeWidth="1.8"
+                        strokeDasharray="5 3"
+                        strokeOpacity="0.7"
+                      />
+                      {!compact && (
+                        <>
+                          <rect
+                            x={mx - 27}
+                            y={badgeY}
+                            width="54"
+                            height="16"
+                            rx="4"
+                            fill="#881337"
+                            stroke="#fb7185"
+                            strokeWidth="1"
+                          />
+                          <text
+                            x={mx}
+                            y={badgeY + 11}
+                            textAnchor="middle"
+                            fill="#ffe4e6"
+                            fontSize="8.5"
+                            className="font-mono-telemetry font-bold"
+                          >
+                            {p.receivedDba} dBA
+                          </text>
+                        </>
+                      )}
+                    </g>
+                  );
+                })}
+
+              {report.contaminationPairs
+                .filter((p) => p.violates)
+                .map((p) => {
+                  const hyg = deckZones.find((z) => z.id === p.hygieneId);
+                  const tgt = deckZones.find((z) => z.id === p.targetId);
+                  if (!hyg || !tgt) return null;
+                  const hx = toPx(hyg.x + hyg.width / 2);
+                  const hy = toPx(hyg.y + hyg.height / 2);
+                  const tx = toPx(tgt.x + tgt.width / 2);
+                  const ty = toPx(tgt.y + tgt.height / 2);
+                  const mx = (hx + tx) / 2;
+                  const my = (hy + ty) / 2;
+                  const badgeY = Math.abs(hy - ty) < 28 ? my + 17 : my - 8;
+                  return (
+                    <g key={`ct-fg-${p.hygieneId}-${p.targetId}`}>
+                      <line
+                        x1={hx}
+                        y1={hy}
+                        x2={tx}
+                        y2={ty}
+                        stroke="#fbbf24"
+                        strokeWidth="1.8"
+                        strokeDasharray="4 3"
+                        strokeOpacity="0.7"
+                      />
+                      {!compact && (
+                        <>
+                          <rect
+                            x={mx - 25}
+                            y={badgeY}
+                            width="50"
+                            height="16"
+                            rx="4"
+                            fill="#78350f"
+                            stroke="#fbbf24"
+                            strokeWidth="1"
+                          />
+                          <text
+                            x={mx}
+                            y={badgeY + 11}
+                            textAnchor="middle"
+                            fill="#fef3c7"
+                            fontSize="8.5"
+                            className="font-mono-telemetry font-bold"
+                          >
+                            {p.distanceM.toFixed(1)}m!
+                          </text>
+                        </>
+                      )}
+                    </g>
+                  );
+                })}
+
+              {!compact &&
+                mission.gravity === '0g' &&
+                deckZones
+                  .filter((z) => z.rotation !== 0 && ZONE_CATALOG[z.type]?.isOccupied)
+                  .map((z) => {
+                    const zx = toPx(z.x) + 6;
+                    const zy = toPx(z.y) + 8;
+                    return (
+                      <g key={`oc-badge-${z.id}`} transform={`translate(${zx}, ${zy})`}>
+                        <rect
+                          width="46"
+                          height="13"
+                          rx="3"
+                          fill="#3b0764"
+                          stroke="#c084fc"
+                          strokeWidth="0.9"
+                        />
+                        <text
+                          x="23"
+                          y="9.5"
+                          textAnchor="middle"
+                          fill="#f3e8ff"
+                          fontSize="8"
+                          className="font-mono-telemetry font-bold"
+                        >
+                          Δ{z.rotation}° 0g
+                        </text>
+                      </g>
+                    );
+                  })}
+            </g>
+          )}
+
+          {/* Perimeter Hatch Nodes & Bottleneck Pinch-Points (On top of module borders) */}
+          {(store.showEgressOverlay || readonly) && (
+            <g pointerEvents="none">
+              {!compact &&
+                deckAirlockPaths.map((p) => {
+                  const startPt = p.points[0];
+                  const endPt = p.points[p.points.length - 1];
+                  return (
+                    <g key={`door-${p.fromZoneId}`}>
+                      <circle
+                        cx={toPx(startPt.x)}
+                        cy={toPx(startPt.y)}
+                        r="3"
+                        fill="#10b981"
+                        stroke="#064e3b"
+                        strokeWidth="1"
+                      />
+                      <circle
+                        cx={toPx(endPt.x)}
+                        cy={toPx(endPt.y)}
+                        r="3.5"
+                        fill="#34d399"
+                        stroke="#064e3b"
+                        strokeWidth="1"
+                      />
+                    </g>
+                  );
+                })}
+
+              {!compact &&
+                deckBottlenecks.map((b, i) => (
+                  <g key={`bn-${i}`} transform={`translate(${toPx(b.x)}, ${toPx(b.y)})`}>
+                    <polygon
+                      points="0,-8 8,0 0,8 -8,0"
+                      fill="#f59e0b"
+                      stroke="#fef3c7"
+                      strokeWidth="1.4"
+                    />
+                    <text y="3.5" textAnchor="middle" fill="#090D16" fontSize="9.5" fontWeight="800">
+                      !
+                    </text>
+                  </g>
+                ))}
+            </g>
+          )}
+
+          {/* Live Synchronized 2D Astronaut Crew-Eye Position & 64° FOV Radar Cone */}
+          {crewEyePose && crewEyePose.active && crewEyePose.deck === activeDeck && !compact && (
+            <g
+              pointerEvents="none"
+              transform={`translate(${toPx(crewEyePose.x)}, ${toPx(crewEyePose.y)}) rotate(${crewEyePose.angleDeg})`}
+            >
+              <polygon
+                points="0,0 58,-34 58,34"
+                fill="#38bdf8"
+                fillOpacity="0.22"
+                stroke="#38bdf8"
+                strokeWidth="1"
+                strokeOpacity="0.55"
+              />
+              <circle r="6" fill="#0284c7" stroke="#e0f2fe" strokeWidth="1.8" />
+              <circle cx="3" cy="0" r="1.8" fill="#ffffff" />
+            </g>
+          )}
+        </svg>
+      </div>
+
+      {/* Docked Selected Module Property Strip */}
+      {selectedZone && selectedCat && !readonly && !compact && (
+        <div className="shrink-0 bg-[var(--surface-panel)] border-t border-[var(--border-strong)] px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2 min-w-0">
+            <span
+              className="w-2.5 h-2.5 rounded-xs shrink-0"
+              style={{ backgroundColor: selectedCat.color }}
+            />
+            <span className="font-semibold text-[var(--text-primary)] truncate max-w-[165px]">
+              {selectedZone.label}
+            </span>
+            <span className="text-[11px] font-mono-telemetry text-[var(--text-secondary)]">
+              ({selectedZone.x.toFixed(2)}, {selectedZone.y.toFixed(2)}) •{' '}
+              {selectedZone.width.toFixed(2)}×{selectedZone.height.toFixed(2)}m •{' '}
+              {selectedZone.rotation}°
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => store.toggleZoneLock(selectedZone.id)}
+              aria-pressed={Boolean(selectedZone.locked)}
+              title={
+                selectedZone.locked
+                  ? 'Unlock module position & allow Auto-Optimize movement'
+                  : 'Pin module position during drag & Auto-Optimize'
+              }
+              className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium border cursor-pointer transition-colors ${
+                selectedZone.locked
+                  ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-200'
+                  : 'bg-[var(--surface-elevated)] hover:bg-[var(--surface-hover)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              {selectedZone.locked ? (
+                <>
+                  <Lock className="w-3 h-3" />
+                  <span>Pinned</span>
+                </>
+              ) : (
+                <>
+                  <Unlock className="w-3 h-3" />
+                  <span>Pin</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              disabled={Boolean(selectedZone.locked)}
+              onClick={() => store.rotateZone(selectedZone.id)}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--surface-elevated)] hover:bg-[var(--surface-hover)] border border-[var(--border-subtle)] text-[11px] text-cyan-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+              title="Rotate 90° (R)"
+            >
+              <RotateCw className="w-3 h-3" />
+              <span>90°</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => store.duplicateZone(selectedZone.id)}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--surface-elevated)] hover:bg-[var(--surface-hover)] border border-[var(--border-subtle)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer transition-colors"
+              title="Duplicate Module"
+            >
+              <Copy className="w-3 h-3" />
+              <span className="hidden sm:inline">Duplicate</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={Boolean(selectedZone.locked)}
+              onClick={() => store.deleteZone(selectedZone.id)}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/35 text-[11px] text-rose-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+              title="Delete Module (Del)"
+            >
+              <Trash2 className="w-3 h-3" />
+              <span>Delete</span>
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

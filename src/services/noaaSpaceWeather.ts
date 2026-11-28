@@ -13,20 +13,22 @@ const NOAA_PROTON_URL =
   'https://services.swpc.noaa.gov/json/goes/primary/integral-protons-1-day.json';
 
 export function classifyXrayFlux(flux: number): { xrayClass: string; rScale: string } {
-  if (flux >= 1e-3) return { xrayClass: `X${(flux / 1e-4).toFixed(1)}`, rScale: 'R4–R5' };
-  if (flux >= 1e-4) return { xrayClass: `X${(flux / 1e-4).toFixed(1)}`, rScale: 'R3' };
-  if (flux >= 1e-5) return { xrayClass: `M${(flux / 1e-5).toFixed(1)}`, rScale: 'R1–R2' };
-  if (flux >= 1e-6) return { xrayClass: `C${(flux / 1e-6).toFixed(1)}`, rScale: 'R0' };
-  if (flux >= 1e-7) return { xrayClass: `B${(flux / 1e-7).toFixed(1)}`, rScale: 'R0' };
-  return { xrayClass: `A${Math.max(1, flux / 1e-8).toFixed(1)}`, rScale: 'R0' };
+  const safeFlux = Number.isFinite(flux) && flux > 0 ? flux : 1e-8;
+  if (safeFlux >= 1e-3) return { xrayClass: `X${(safeFlux / 1e-4).toFixed(1)}`, rScale: 'R4–R5' };
+  if (safeFlux >= 1e-4) return { xrayClass: `X${(safeFlux / 1e-4).toFixed(1)}`, rScale: 'R3' };
+  if (safeFlux >= 1e-5) return { xrayClass: `M${(safeFlux / 1e-5).toFixed(1)}`, rScale: 'R1–R2' };
+  if (safeFlux >= 1e-6) return { xrayClass: `C${(safeFlux / 1e-6).toFixed(1)}`, rScale: 'R0' };
+  if (safeFlux >= 1e-7) return { xrayClass: `B${(safeFlux / 1e-7).toFixed(1)}`, rScale: 'R0' };
+  return { xrayClass: `A${Math.max(1, safeFlux / 1e-8).toFixed(1)}`, rScale: 'R0' };
 }
 
 export function classifyProtonFlux(pfu: number): string {
-  if (pfu >= 100_000) return 'S5 (Extreme)';
-  if (pfu >= 10_000) return 'S4 (Severe)';
-  if (pfu >= 1_000) return 'S3 (Strong)';
-  if (pfu >= 100) return 'S2 (Moderate)';
-  if (pfu >= 10) return 'S1 (Minor)';
+  const safePfu = Number.isFinite(pfu) ? pfu : 0;
+  if (safePfu >= 100_000) return 'S5 (Extreme)';
+  if (safePfu >= 10_000) return 'S4 (Severe)';
+  if (safePfu >= 1_000) return 'S3 (Strong)';
+  if (safePfu >= 100) return 'S2 (Moderate)';
+  if (safePfu >= 10) return 'S1 (Minor)';
   return 'S0 (Nominal)';
 }
 
@@ -42,10 +44,7 @@ function buildSyntheticSeries(
     const t = i / (points - 1);
     const ts = new Date(now - (points - 1 - i) * 40 * 60 * 1000).toISOString();
     const dist = t - spikeAt;
-    const pulse =
-      dist >= 0
-        ? Math.exp(-dist * 7.5)
-        : Math.exp(-Math.pow(dist * 12, 2));
+    const pulse = dist >= 0 ? Math.exp(-dist * 7.5) : Math.exp(-Math.pow(dist * 12, 2));
     const jitter = 0.92 + ((i * 37) % 17) / 100;
     const val = (baseline + (peak - baseline) * pulse) * jitter;
     series.push({ timestamp: ts, value: Number(val.toExponential(3)) });
@@ -93,7 +92,6 @@ export function getStormPreset(presetId: Exclude<StormPresetId, 'live'>): SpaceW
     };
   }
 
-  // extreme_x10
   const xray = 1.05e-3;
   const proton = 18_500;
   return {
@@ -125,12 +123,81 @@ interface NoaaProtonRow {
 }
 
 /**
+ * Parses raw NOAA GOES JSON arrays safely; exported so unit tests can verify fallback & edge cases.
+ */
+export function parseNoaaPayloads(
+  xrayRaw: unknown,
+  protonRaw: unknown
+): SpaceWeatherTelemetry | null {
+  if (!Array.isArray(xrayRaw) || !Array.isArray(protonRaw)) return null;
+
+  const longXray = (xrayRaw as NoaaXrayRow[]).filter(
+    (r) =>
+      r &&
+      r.energy === '0.1-0.8nm' &&
+      typeof r.flux === 'number' &&
+      Number.isFinite(r.flux) &&
+      r.flux > 0
+  );
+  const tenMevProtons = (protonRaw as NoaaProtonRow[]).filter(
+    (r) =>
+      r &&
+      r.energy === '>=10 MeV' &&
+      typeof r.flux === 'number' &&
+      Number.isFinite(r.flux) &&
+      r.flux > 0
+  );
+
+  if (longXray.length === 0 || tenMevProtons.length === 0) return null;
+
+  const sample = <T,>(arr: T[], maxPts = 40): T[] => {
+    if (arr.length <= maxPts) return arr;
+    const step = Math.ceil(arr.length / maxPts);
+    const out: T[] = [];
+    for (let i = 0; i < arr.length; i += step) out.push(arr[i]);
+    if (out[out.length - 1] !== arr[arr.length - 1]) out.push(arr[arr.length - 1]);
+    return out;
+  };
+
+  const xraySeries: TelemetryPoint[] = sample(longXray).map((r) => ({
+    timestamp: r.time_tag,
+    value: r.flux,
+  }));
+  const protonSeries: TelemetryPoint[] = sample(tenMevProtons).map((r) => ({
+    timestamp: r.time_tag,
+    value: r.flux,
+  }));
+
+  const latestXray = longXray[longXray.length - 1].flux;
+  const latestProton = tenMevProtons[tenMevProtons.length - 1].flux;
+  const { xrayClass, rScale } = classifyXrayFlux(latestXray);
+  const sScale = classifyProtonFlux(latestProton);
+
+  const warningWindowSec = latestProton >= 1000 ? 300 : latestProton >= 10 ? 600 : 1800;
+
+  return {
+    source: 'LIVE_NOAA_GOES',
+    presetId: 'live',
+    label: 'NOAA SWPC GOES Primary (Live)',
+    fetchedAt: new Date().toISOString(),
+    xrayFluxWm2: latestXray,
+    xrayClass,
+    protonFluxPfu: Number(latestProton.toFixed(2)),
+    noaaRScale: rScale,
+    noaaSScale: sScale,
+    xraySeries,
+    protonSeries,
+    warningWindowSec,
+  };
+}
+
+/**
  * Fetches live NOAA SWPC GOES primary X-Ray and >=10 MeV Integral Proton telemetry.
- * Falls back gracefully to realistic cached telemetry if offline or rate-limited.
+ * Falls back gracefully within 4.5s to realistic cached telemetry if offline or rate-limited.
  */
 export async function fetchNoaaSpaceWeather(): Promise<SpaceWeatherTelemetry> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5000);
+  const timeout = setTimeout(() => controller.abort(), 4500);
 
   try {
     const [xrayRes, protonRes] = await Promise.all([
@@ -142,66 +209,11 @@ export async function fetchNoaaSpaceWeather(): Promise<SpaceWeatherTelemetry> {
       throw new Error(`NOAA HTTP status ${xrayRes.status}/${protonRes.status}`);
     }
 
-    const [xrayRaw, protonRaw] = (await Promise.all([
-      xrayRes.json(),
-      protonRes.json(),
-    ])) as [NoaaXrayRow[], NoaaProtonRow[]];
-
-    // Filter primary long-wavelength X-ray channel (0.1-0.8nm) and >=10 MeV protons
-    const longXray = xrayRaw.filter(
-      (r) => r.energy === '0.1-0.8nm' && typeof r.flux === 'number' && r.flux > 0
-    );
-    const tenMevProtons = protonRaw.filter(
-      (r) => r.energy === '>=10 MeV' && typeof r.flux === 'number' && r.flux > 0
-    );
-
-    if (longXray.length === 0 || tenMevProtons.length === 0) {
-      throw new Error('NOAA feed returned empty channels');
-    }
-
-    // Subsample to ~40 points for crisp sparklines
-    const sample = <T,>(arr: T[], maxPts = 40): T[] => {
-      if (arr.length <= maxPts) return arr;
-      const step = Math.ceil(arr.length / maxPts);
-      const out: T[] = [];
-      for (let i = 0; i < arr.length; i += step) out.push(arr[i]);
-      if (out[out.length - 1] !== arr[arr.length - 1]) out.push(arr[arr.length - 1]);
-      return out;
-    };
-
-    const xraySeries: TelemetryPoint[] = sample(longXray).map((r) => ({
-      timestamp: r.time_tag,
-      value: r.flux,
-    }));
-    const protonSeries: TelemetryPoint[] = sample(tenMevProtons).map((r) => ({
-      timestamp: r.time_tag,
-      value: r.flux,
-    }));
-
-    const latestXray = longXray[longXray.length - 1].flux;
-    const latestProton = tenMevProtons[tenMevProtons.length - 1].flux;
-    const { xrayClass, rScale } = classifyXrayFlux(latestXray);
-    const sScale = classifyProtonFlux(latestProton);
-
-    const warningWindowSec =
-      latestProton >= 1000 ? 300 : latestProton >= 10 ? 600 : 1800;
-
-    return {
-      source: 'LIVE_NOAA_GOES',
-      presetId: 'live',
-      label: 'NOAA SWPC GOES Primary (Live)',
-      fetchedAt: new Date().toISOString(),
-      xrayFluxWm2: latestXray,
-      xrayClass,
-      protonFluxPfu: Number(latestProton.toFixed(2)),
-      noaaRScale: rScale,
-      noaaSScale: sScale,
-      xraySeries,
-      protonSeries,
-      warningWindowSec,
-    };
+    const [xrayRaw, protonRaw] = await Promise.all([xrayRes.json(), protonRes.json()]);
+    const parsed = parseNoaaPayloads(xrayRaw, protonRaw);
+    if (!parsed) throw new Error('Invalid NOAA payload schema');
+    return parsed;
   } catch {
-    // Graceful offline / CORS fallback
     const fallback = getStormPreset('quiet_b');
     return {
       ...fallback,
@@ -213,7 +225,8 @@ export async function fetchNoaaSpaceWeather(): Promise<SpaceWeatherTelemetry> {
 }
 
 /**
- * Stress-tests the habitat's Radiation Storm Shelter against the active solar weather event.
+ * Stress-tests the habitat's Radiation Storm Shelter & TransHab Water-Wall mass bonus
+ * against the active solar particle event. All returned numbers are strictly finite.
  */
 export function evaluateStormShelterStress(
   mission: MissionConfig,
@@ -234,27 +247,31 @@ export function evaluateStormShelterStress(
   );
 
   const allCrewReachable = hasShelter && report.egress.shelterReachable;
-  const worstTransitSec = allCrewReachable ? report.egress.worstShelterTimeSec : Infinity;
+  const worstTransitSec = allCrewReachable ? report.egress.worstShelterTimeSec : 0;
 
-  // Estimate shielding areal density (g/cm^2 water/HDPE equivalent)
-  // Base hull (~6 g/cm^2) + dedicated water-wall storm shelter (+16 to +28 g/cm^2 depending on shelter mass/size)
+  // Base hull + dedicated Storm Shelter + TransHab adjacent Stowage/ECLSS Water-Wall bonus ([V2 6095])
   const hullBaseGcm2 =
     mission.hull.type === 'surface_dome' ? 12 : mission.hull.type === 'inflatable' ? 7 : 6;
-  const shelterBonusGcm2 = hasShelter
-    ? Math.min(28, 14 + Math.min(14, shelterVolumeM3 * 1.1))
+  const shelterCoreGcm2 = hasShelter
+    ? Math.min(24, 13 + Math.min(11, shelterVolumeM3 * 1.05))
     : 0;
-  const shieldingArealDensityGcm2 = Number((hullBaseGcm2 + shelterBonusGcm2).toFixed(1));
+  const baseShieldingGcm2 = Number((hullBaseGcm2 + shelterCoreGcm2).toFixed(1));
+  const waterWallBonusGcm2 = report.waterWall?.shieldingBonusGcm2 ?? 0;
+  const shieldingArealDensityGcm2 = Number((baseShieldingGcm2 + waterWallBonusGcm2).toFixed(1));
 
-  // Estimate 24h SPE unshielded free-space dose from >=10 MeV proton flux (pfu)
-  // Quiet (<1 pfu): ~0.8 mSv/day GCR; S2 (240 pfu): ~95 mSv; S4 X10 (18,500 pfu): ~1,450 mSv unshielded
   const unshieldedDoseMsv = Number(
     (0.8 + Math.pow(Math.max(0, telemetry.protonFluxPfu), 0.74) * 1.02).toFixed(1)
   );
 
-  // Exponential attenuation model for solar protons through water/HDPE shielding
-  const attenuationFactor = Math.exp(-shieldingArealDensityGcm2 / 14.5);
+  const doseWithoutWaterWall = Math.max(
+    0.5,
+    unshieldedDoseMsv * Math.exp(-baseShieldingGcm2 / 14.5)
+  );
   const shieldedDoseMsv = Number(
-    Math.max(0.5, unshieldedDoseMsv * attenuationFactor).toFixed(1)
+    Math.max(0.5, unshieldedDoseMsv * Math.exp(-shieldingArealDensityGcm2 / 14.5)).toFixed(1)
+  );
+  const doseReductionFromWaterWallMsv = Number(
+    Math.max(0, doseWithoutWaterWall - shieldedDoseMsv).toFixed(1)
   );
 
   const diagnostics: StormStressResult['diagnostics'] = [];
@@ -312,6 +329,14 @@ export function evaluateStormShelterStress(
     });
   }
 
+  if (waterWallBonusGcm2 > 0) {
+    diagnostics.push({
+      severity: 'PASS',
+      title: `TransHab Water-Wall Bonus (+${waterWallBonusGcm2} g/cm²)`,
+      detail: `Adjacent Stowage & ECLSS water tanks cut crew radiation dose by an extra ${doseReductionFromWaterWallMsv} mSv.`,
+    });
+  }
+
   if (shieldedDoseMsv > acuteLimitMsv) {
     failCount++;
     diagnostics.push({
@@ -324,7 +349,7 @@ export function evaluateStormShelterStress(
     diagnostics.push({
       severity: 'WARNING',
       title: 'Elevated Radiation Dose Margin',
-      detail: `Projected shielded dose is ${shieldedDoseMsv} mSv (${Math.round((shieldedDoseMsv / acuteLimitMsv) * 100)}% of 250 mSv limit). Consider adding water-wall mass.`,
+      detail: `Projected shielded dose is ${shieldedDoseMsv} mSv (${Math.round((shieldedDoseMsv / acuteLimitMsv) * 100)}% of 250 mSv limit). Place Stowage water bags beside the shelter.`,
     });
   } else {
     diagnostics.push({
@@ -346,9 +371,12 @@ export function evaluateStormShelterStress(
     allCrewReachable,
     worstTransitSec,
     warningWindowSec: telemetry.warningWindowSec,
+    baseShieldingGcm2,
+    waterWallBonusGcm2,
     shieldingArealDensityGcm2,
     unshieldedDoseMsv,
     shieldedDoseMsv,
+    doseReductionFromWaterWallMsv,
     acuteLimitMsv,
     diagnostics,
   };

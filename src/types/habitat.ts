@@ -2,6 +2,8 @@ export type GravityRegime = '0g' | '1/6g' | '3/8g';
 
 export type HullType = 'rigid_cylinder' | 'inflatable' | 'surface_dome';
 
+export type LightingMode = 'day' | 'sleep' | 'emergency';
+
 export type ZoneType =
   | 'crew_quarters'
   | 'galley'
@@ -21,14 +23,18 @@ export type RuleCategory =
   | 'CONTAMINATION'
   | 'EGRESS'
   | 'CREW_SUPPORT'
-  | 'GEOMETRY';
+  | 'GEOMETRY'
+  | 'ORIENTATION'
+  | 'LIGHTING'
+  | 'AIRFLOW'
+  | 'RADIATION';
 
 export interface HullGeometry {
   type: HullType;
-  diameter: number; // meters (Y span for cylinder/inflatable, full diameter for dome)
-  length: number; // meters (X span for cylinder/inflatable; equals diameter for dome)
+  diameter: number; // meters
+  length: number; // meters (equals diameter for surface_dome)
   decks: number; // 1 to 3
-  wallThickness: number; // meters (structural hull wall)
+  wallThickness: number; // meters
 }
 
 export interface MissionConfig {
@@ -46,9 +52,9 @@ export interface ZoneNode {
   deck: number; // 0-indexed deck
   x: number; // meters from hull left edge (snapped to 0.25m)
   y: number; // meters from hull top edge (snapped to 0.25m)
-  width: number; // meters (X span in current orientation)
-  height: number; // meters (Y span in current orientation)
-  zHeight: number; // meters (vertical ceiling height inside deck)
+  width: number; // meters
+  height: number; // meters
+  zHeight: number; // meters
   rotation: 0 | 90 | 180 | 270;
   locked?: boolean;
 }
@@ -65,14 +71,16 @@ export interface ZoneCatalogEntry {
   defaultZHeight: number;
   color: string;
   accentColor: string;
-  noiseEmitDba: number; // 0 if quiet
+  noiseEmitDba: number;
+  illuminanceLux: number; // nominal operational task lux (NASA-STD-3001 Table 8.7-1)
   isQuietZone: boolean;
   isContaminationSource: boolean;
   isContaminationSensitive: boolean;
-  isOccupied: boolean; // requires egress paths
-  isEquipmentOnly: boolean; // deducted from NHV as equipment/stowage
-  equipmentFraction: number; // fraction of zone volume occupied by hardware racks/equipment (0..1)
-  massDensityKgPerM3: number; // estimated outfitting equipment mass density
+  isOccupied: boolean;
+  isEquipmentOnly: boolean;
+  isWaterMassShield: boolean; // contributes hydrogen-rich radiation attenuation
+  equipmentFraction: number;
+  massDensityKgPerM3: number;
 }
 
 export interface RuleViolation {
@@ -122,8 +130,8 @@ export interface EgressPath {
   targetType: 'airlock' | 'storm_shelter';
   deck: number;
   reachable: boolean;
-  distanceM: number;
-  transitTimeSec: number;
+  distanceM: number; // finite number (0 if unreachable)
+  transitTimeSec: number; // finite number (0 if unreachable)
   points: EgressPoint[];
   minClearanceM: number;
 }
@@ -148,6 +156,39 @@ export interface EgressResult {
   gridResolutionM: number;
 }
 
+export interface AirflowLink {
+  fromEclssId: string;
+  toZoneId: string;
+  toLabel: string;
+  deck: number;
+  distanceM: number;
+  openDoorCells: number;
+  stagnantRisk: boolean;
+  points: EgressPoint[];
+}
+
+export interface OrientationConflict {
+  zoneAId: string;
+  zoneALabel: string;
+  zoneBId: string;
+  zoneBLabel: string;
+  deltaDeg: number;
+}
+
+export interface WaterWallBonus {
+  shieldingBonusGcm2: number;
+  bufferedPerimeterRatio: number;
+  contributingZoneIds: string[];
+  doseSavedPct: number;
+}
+
+export interface IlluminanceReport {
+  minCorridorLux: number;
+  targetCorridorLux: number;
+  lightSpillZoneIds: string[];
+  underlitZoneIds: string[];
+}
+
 export interface EvaluationReport {
   score: number; // 0 - 100
   grossVolumeM3: number;
@@ -158,7 +199,7 @@ export interface EvaluationReport {
   nhvPerCrewM3: number;
   requiredNhvPerCrewM3: number;
   estimatedMassKg: number;
-  estimatedLaunchCostM: number; // $M USD
+  estimatedLaunchCostM: number;
   violations: RuleViolation[];
   criticalCount: number;
   warningCount: number;
@@ -166,6 +207,11 @@ export interface EvaluationReport {
   acousticPairs: AcousticPair[];
   contaminationPairs: ContaminationPair[];
   egress: EgressResult;
+  airflowLinks: AirflowLink[];
+  stagnantZoneIds: string[];
+  orientationConflicts: OrientationConflict[];
+  waterWall: WaterWallBonus;
+  illuminance: IlluminanceReport;
   computeTimeMs: number;
 }
 
@@ -192,14 +238,14 @@ export interface SpaceWeatherTelemetry {
   presetId: StormPresetId;
   label: string;
   fetchedAt: string;
-  xrayFluxWm2: number; // 0.1-0.8 nm W/m^2
-  xrayClass: string; // e.g., "B4.2", "M5.4", "X10.0"
-  protonFluxPfu: number; // >=10 MeV particles / (cm^2 s sr)
-  noaaRScale: string; // R0 - R5
-  noaaSScale: string; // S0 - S5
+  xrayFluxWm2: number;
+  xrayClass: string;
+  protonFluxPfu: number;
+  noaaRScale: string;
+  noaaSScale: string;
   xraySeries: TelemetryPoint[];
   protonSeries: TelemetryPoint[];
-  warningWindowSec: number; // estimated time from flare detection to peak proton arrival
+  warningWindowSec: number;
 }
 
 export interface StormStressResult {
@@ -209,11 +255,14 @@ export interface StormStressResult {
   shelterVolumePerCrewM3: number;
   requiredVolumePerCrewM3: number;
   allCrewReachable: boolean;
-  worstTransitSec: number;
+  worstTransitSec: number; // finite number (0 if unreachable)
   warningWindowSec: number;
+  baseShieldingGcm2: number;
+  waterWallBonusGcm2: number;
   shieldingArealDensityGcm2: number;
   unshieldedDoseMsv: number;
   shieldedDoseMsv: number;
+  doseReductionFromWaterWallMsv: number;
   acuteLimitMsv: number;
   diagnostics: Array<{
     severity: Severity;
@@ -229,6 +278,10 @@ export interface OptimizationSummary {
   afterCritical: number;
   beforeWarning: number;
   afterWarning: number;
+  violationsFixed: number;
+  beforeWorstEgressM: number;
+  afterWorstEgressM: number;
+  elapsedMs: number;
   iterations: number;
   previousZones: ZoneNode[];
 }
